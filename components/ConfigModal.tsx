@@ -9,38 +9,67 @@ export default function ConfigModal({ onClose }: { onClose: () => void }) {
     schoolName: "",
     startTime: "08:00",
     endTime: "16:00",
-    periodDuration: 60, // นาที
+    periodDuration: 60,
   });
 
-  // โหลดค่าเดิมเมื่อเปิด Modal
+  const API_URL = "/api/config/school"; 
+
   useEffect(() => {
-    fetch("/api/config")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.schoolName) setConfig(data);
-      });
+    const loadConfig = async () => {
+      try {
+        const res = await fetch(API_URL);
+        
+        if (!res.ok) {
+           console.error("API Error:", res.status, res.statusText);
+           return; // ถ้าไม่เจอ (404) ให้จบงานเลย ไม่ต้องแปลง JSON
+        }
+
+        const data = await res.json();
+
+        if (data && data.schoolName) {
+          console.log("เจอข้อมูลเก่า:", data);
+          setConfig({
+            schoolName: data.schoolName,
+            startTime: data.startTime || "08:00",
+            endTime: data.endTime || "16:00",
+            periodDuration: data.periodDuration || 60,
+          });
+        }
+      } catch (error) {
+        console.error("โหลดข้อมูลไม่สำเร็จ:", error);
+      }
+    };
+
+    loadConfig();
   }, []);
 
   const handleSave = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/config/school", {
+      const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
+      
       if (res.ok) {
         alert("บันทึกข้อมูลเรียบร้อย! ระบบคำนวณคาบเรียนใหม่ให้แล้ว");
         onClose();
-        window.location.reload(); // รีเฟรชหน้าจอเพื่ออัปเดตตาราง
+        window.location.reload();
+      } else {
+         // อ่าน Error ที่ส่งมาจาก Backend (ถ้ามี)
+         const err = await res.json();
+         alert("เกิดข้อผิดพลาด: " + (err.error || "บันทึกไม่สำเร็จ"));
       }
     } catch (error) {
-      alert("บันทึกไม่สำเร็จ");
+      console.error("Save Error:", error);
+      alert("บันทึกไม่สำเร็จ (ตรวจสอบ Console)");
     } finally {
       setLoading(false);
     }
   };
 
+  // ... (ส่วน return เหมือนเดิม)
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
       <div className="bg-white p-6 rounded-2xl shadow-2xl w-full max-w-md border border-gray-100 animate-in fade-in zoom-in duration-200">

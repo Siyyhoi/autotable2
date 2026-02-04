@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import clientPromise from '../../../../lib/mongodb';
+import clientPromise from '@/lib/mongodb';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
     const { schoolName, startTime, endTime, periodDuration } = body;
 
     const client = await clientPromise;
@@ -74,7 +75,6 @@ export async function POST(req: Request) {
   }
 }
 
-// ฟังก์ชันดึงค่า Config เดิมมาโชว์
 export async function GET() {
     try {
         const client = await clientPromise;
