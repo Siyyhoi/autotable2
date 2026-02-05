@@ -1,22 +1,30 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import ConfigModal from "@/components/ConfigModal";
-import { RefreshCw, Calendar, User, MapPin, Settings, School } from "lucide-react";
+// ✅ เปลี่ยนชื่อ import ให้ชัดเจนขึ้น (ถ้ามีหลาย Config)
+import ConfigSchool from "@/components/config/Configschool"; 
+import ConfigRoom from "@/components/config/ConfigRoom";
+import ConfigSubject from "@/components/config/ConfigSubject";
+import ConfigTeacher from "@/components/config/ConfigTeacher";
+
+
+import { Calendar, User, MapPin, Settings, School, LayoutGrid, Users, BookOpen } from "lucide-react";
 
 export default function Home() {
   const [schedule, setSchedule] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [aiAnalysis, setAiAnalysis] = useState("");
-  const [showConfig, setShowConfig] = useState(false);
 
-  // ✅ State สำหรับข้อมูลโรงเรียนและ Slot ที่ดึงมาจาก DB
+  // ✅ State ควบคุมการเปิด Modal ต่างๆ
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+
+  // Data State
   const [schoolName, setSchoolName] = useState("AI Scheduler Assistant");
   const [slots, setSlots] = useState<any[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
-  // 1. โหลดข้อมูล Slot และ Config เมื่อเข้าเว็บ
+  // 1. โหลดข้อมูล
   useEffect(() => {
     fetch("/api/master-data")
       .then((res) => res.json())
@@ -63,16 +71,15 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-8 font-sans text-gray-800">
-      <div className="max-w-[95%] mx-auto space-y-6"> {/* ขยายความกว้างให้รองรับหลายคาบ */}
+      <div className="max-w-[95%] mx-auto space-y-6">
         
-        {/* Header Section */}
+        {/* Header Section (เอาปุ่มตั้งค่าออกแล้ว) */}
         <div className="bg-indigo-900 text-white p-6 rounded-2xl shadow-lg flex justify-between items-start">
           <div className="flex items-start gap-4">
             <div className="p-3 bg-white/10 rounded-full">
               <School className="w-8 h-8" />
             </div>
             <div>
-              {/* ✅ โชว์ชื่อโรงเรียนที่ตั้งค่าไว้ */}
               <h1 className="text-2xl font-bold">{schoolName}</h1>
               <p className="text-indigo-200 mt-1 leading-relaxed">
                 {loading 
@@ -81,14 +88,6 @@ export default function Home() {
               </p>
             </div>
           </div>
-
-          <button 
-            onClick={() => setShowConfig(true)}
-            className="flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg transition-all border border-white/20 shadow-sm"
-          >
-            <Settings className="w-5 h-5" />
-            <span className="text-sm font-medium hidden sm:inline">ตั้งค่าโรงเรียน</span>
-          </button>
         </div>
 
         {/* Input Section */}
@@ -129,8 +128,6 @@ export default function Home() {
               <thead>
                 <tr className="bg-gray-100 text-gray-600 text-sm uppercase tracking-wider">
                   <th className="p-4 w-24 text-center border-r border-gray-200 bg-gray-200/50 sticky left-0 z-10">Day</th>
-                  
-                  {/* ✅ Loop สร้างหัวตารางตามจำนวนคาบจริงจาก DB */}
                   {slots.map((slot) => (
                     <th key={slot.id} className="p-3 text-center border-r border-gray-200 last:border-0 min-w-[140px]">
                       <div className="font-bold text-gray-800">คาบที่ {slot.id}</div>
@@ -139,11 +136,8 @@ export default function Home() {
                       </div>
                     </th>
                   ))}
-                  
                   {slots.length === 0 && !isLoadingData && (
-                    <th className="p-4 text-center text-red-400 font-normal">
-                      ยังไม่ได้ตั้งค่าเวลาเรียน (กรุณากดปุ่มตั้งค่า)
-                    </th>
+                    <th className="p-4 text-center text-red-400 font-normal">ยังไม่ได้ตั้งค่าเวลาเรียน</th>
                   )}
                 </tr>
               </thead>
@@ -153,8 +147,6 @@ export default function Home() {
                     <td className="p-4 font-bold text-center text-gray-700 border-r border-gray-200 bg-gray-50 sticky left-0 z-10 shadow-sm">
                       {day}
                     </td>
-                    
-                    {/* ✅ Loop สร้างช่องตารางตามจำนวนคาบจริง */}
                     {slots.map((slot) => {
                       const subject = getClass(day, slot.id);
                       return (
@@ -195,7 +187,68 @@ export default function Home() {
           </div>
         </div>
 
-        {showConfig && <ConfigModal onClose={() => setShowConfig(false)} />}
+        {/* ========================================================= */}
+        {/* 👇 ADMIN / TESTING ZONE - ย้ายมาไว้ข้างล่างสุดตรงนี้ 👇 */}
+        {/* ========================================================= */}
+        <div className="mt-12 p-8 bg-slate-100 border-2 border-dashed border-slate-300 rounded-2xl">
+            <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
+                🛠️ ส่วนตั้งค่า (Developer Zone)
+            </h3>
+            <div className="flex flex-wrap gap-4">
+                {/* 1. ปุ่มตั้งค่าโรงเรียน */}
+                <button 
+                    onClick={() => setActiveModal("school")}
+                    className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border hover:border-indigo-500 hover:text-indigo-600 hover:shadow-md transition-all"
+                >
+                    <Settings className="w-5 h-5" />
+                    <div className="text-left">
+                        <div className="font-semibold text-sm">ตั้งค่าโรงเรียน</div>
+                        <div className="text-xs text-gray-500">เวลาเรียน, คาบเรียน</div>
+                    </div>
+                </button>
+
+                {/* 2. ปุ่มจัดการห้องเรียน (ถ้ามี ConfigRoom แล้ว) */}
+                <button 
+                    onClick={() => setActiveModal("room")} 
+                    // ⚠️ ถ้ายังไม่มีไฟล์ ConfigRoom ให้ใส่ disabled ไว้ก่อน
+                    // disabled 
+                    className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border hover:border-pink-500 hover:text-pink-600 hover:shadow-md transition-all">
+                    <LayoutGrid className="w-5 h-5" />
+                    <div className="text-left">
+                        <div className="font-semibold text-sm">จัดการห้องเรียน</div>
+                        <div className="text-xs text-gray-500">เพิ่มห้อง, ความจุ</div>
+                    </div>
+                </button>
+
+                 {/* 3. ปุ่มครู (Placeholder) */}
+                 <button 
+                    onClick={() => setActiveModal("teacher")} 
+                    className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border hover:border-pink-500 hover:text-pink-600 hover:shadow-md transition-all">
+                    <Users className="w-5 h-5" />
+                    <div className="text-left">
+                        <div className="font-semibold text-sm">จัดการครู</div>
+                    </div>
+                </button>
+
+                {/* 4. ปุ่มวิชา (Placeholder) */}
+                <button 
+                onClick={() => setActiveModal("subject")} 
+                className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border hover:border-pink-500 hover:text-pink-600 hover:shadow-md transition-all">
+                    <BookOpen className="w-5 h-5" />
+                    <div className="text-left">
+                        <div className="font-semibold text-sm">จัดการวิชา</div>
+                    </div>
+                </button>
+            </div>
+        </div>
+
+        {/* Render Modals ตาม state */}
+        {activeModal === "school" && <ConfigSchool onClose={() => setActiveModal(null)} />}
+        {activeModal === "room" && <ConfigRoom onClose={() => setActiveModal(null)} />}
+        {activeModal === "subject" && <ConfigSubject onClose={() => setActiveModal(null)} />}
+        {activeModal === "teacher" && <ConfigTeacher onClose={() => setActiveModal(null)} />}
+
+
       </div>
     </div>
   );
