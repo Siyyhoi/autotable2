@@ -6,13 +6,14 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-// 🟢 Helper Function: แปลงเวลา "08:30" -> นาที (int)
+// ============================================
+// 🟢 Helper Functions
+// ============================================
 const timeToMinutes = (timeStr: string) => {
   const [hours, minutes] = timeStr.split(":").map(Number);
   return hours * 60 + minutes;
 };
 
-// 🟢 Helper Function: แปลงนาที -> เวลา "08:30"
 const minutesToTime = (totalMinutes: number) => {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -20,9 +21,166 @@ const minutesToTime = (totalMinutes: number) => {
 };
 
 function isEditCommand(prompt: string) {
-  return /ย้าย|สลับ|ลบ|เพิ่ม|แก้ไข|move|swap|delete|add|edit/i.test(prompt);
+  return /ช่วย|ย้าย|สลับ|ลบ|เพิ่ม|แก้ไข|เปลี่ยน|move|swap|delete|add|edit|help|please/i.test(prompt);
 }
 
+function isAnalysisQuery(prompt: string) {
+  return /ตารางนี้|เป็นยังไง|ดูอย่างไร|วิเคราะห์|แนะนำ|ปรับปรุง|ช่วยดู|คิดว่า|analyze|review|suggest|how.*look|what.*think/i.test(prompt);
+}
+
+// ============================================
+// 🧠 AI REASONING ENGINE (ใหม่!)
+// ============================================
+async function getAIRecommendation(userPrompt: string, currentSchedule: any[]) {
+  try {
+    // สร้าง schedule summary
+    const subjectCount = [...new Set(currentSchedule.map(s => s.subject))].length;
+    const teacherCount = [...new Set(currentSchedule.map(s => s.teacher))].length;
+    const roomCount = [...new Set(currentSchedule.map(s => s.room))].length;
+    
+    // นับคาบต่อวัน
+    const dayDistribution = currentSchedule.reduce((acc: any, curr: any) => {
+      acc[curr.day] = (acc[curr.day] || 0) + 1;
+      return acc;
+    }, {});
+
+    // นับภาระครู
+    const teacherWorkload = currentSchedule.reduce((acc: any, curr: any) => {
+      acc[curr.teacher] = (acc[curr.teacher] || 0) + 1;
+      return acc;
+    }, {});
+
+    const analysisPrompt = `
+🧠 INTELLIGENT SCHEDULE ANALYZER & ADVISOR
+
+CURRENT SCHEDULE OVERVIEW:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 Total Entries: ${currentSchedule.length}
+📚 Subjects: ${subjectCount}
+👨‍🏫 Teachers: ${teacherCount}
+🏫 Rooms: ${roomCount}
+
+📅 Day Distribution:
+${Object.entries(dayDistribution).map(([day, count]) => `   ${day}: ${count} คาบ`).join('\n')}
+
+👨‍🏫 Teacher Workload (Top 5):
+${Object.entries(teacherWorkload)
+  .sort((a: any, b: any) => b[1] - a[1])
+  .slice(0, 5)
+  .map(([teacher, count]) => `   ${teacher}: ${count} คาบ`)
+  .join('\n')}
+
+RECENT SCHEDULE ENTRIES (First 25):
+${JSON.stringify(currentSchedule.slice(0, 25), null, 2)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 USER REQUEST: "${userPrompt}"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+YOUR MISSION:
+Analyze the request and provide INTELLIGENT, CONTEXT-AWARE recommendations.
+
+RESPONSE TYPES:
+
+1️⃣ DELETE REQUEST (e.g., "ลบคาบ 7 วันศุกร์")
+   → Check: What subject is being deleted?
+   → Check: Does it exist elsewhere?
+   → Suggest: Should we move it instead? Or is deletion safe?
+
+2️⃣ SWAP/MOVE REQUEST (e.g., "สลับคาบ 4 กับ 6")
+   → Check: Will this create teacher/room conflicts?
+   → Check: Does it improve or worsen schedule balance?
+   → Suggest: Better alternatives if current choice is problematic
+
+3️⃣ ANALYSIS REQUEST (e.g., "ตารางนี้เป็นยังไง")
+   → Analyze: Distribution fairness, gaps, consecutive slots
+   → Identify: Problems (overloaded days, teacher burnout, etc.)
+   → Suggest: Concrete improvements
+
+RESPONSE FORMAT (JSON ONLY):
+{
+  "query_type": "DELETE" | "SWAP" | "MOVE" | "ANALYSIS" | "UNKNOWN",
+  "understanding": "Brief explanation of what user wants",
+  "current_state": "What's happening in current schedule related to request",
+  "smart_suggestion": "Main recommendation with reasoning",
+  "alternative_options": ["Option A with pros/cons", "Option B with pros/cons"],
+  "potential_issues": ["Warning 1", "Warning 2"],
+  "safety_check": "Is this action safe? Any conflicts?",
+  "confidence": 0.95
+}
+
+EXAMPLES:
+
+User: "ลบคาบ 7 วันศุกร์"
+→ Detect: What subject is at Fri Slot 7?
+→ Check: Does same subject exist on other days?
+→ Respond: 
+{
+  "query_type": "DELETE",
+  "understanding": "User wants to delete Friday Slot 7",
+  "current_state": "Currently: 'การเขียนโปรแกรม' is scheduled at Fri Slot 7. This subject also appears at Mon Slot 3, Wed Slot 5.",
+  "smart_suggestion": "ลบได้ปลอดภัย เพราะวิชานี้ยังมีคาบอื่นอยู่ 2 คาบ (Mon, Wed) ซึ่งเพียงพอต่อชั่วโมงเรียน",
+  "alternative_options": [
+    "ย้ายคาบนี้ไปวันอื่นแทนการลบ ถ้าต้องการเก็บชั่วโมงเรียนไว้",
+    "ลบและเพิ่มวิชาอื่นที่ยังขาดชั่วโมงมาแทน"
+  ],
+  "potential_issues": ["วันศุกร์จะเหลือเพียง 2 คาบ อาจดูว่างเกินไป"],
+  "safety_check": "✅ ปลอดภัย ไม่กระทบการเรียนการสอน",
+  "confidence": 0.95
+}
+
+User: "ตารางนี้เป็นยังไง"
+→ Analyze schedule balance, gaps, teacher workload
+→ Respond:
+{
+  "query_type": "ANALYSIS",
+  "understanding": "User wants overall schedule evaluation",
+  "current_state": "Schedule has 40 entries across 5 days. Tue has 10 classes, Fri has only 4.",
+  "smart_suggestion": "ตารางโดยรวมดี แต่วันอังคารแน่นเกินไป (10 คาบ) ควรย้ายบางวิชาไปวันศุกร์ (มีแค่ 4 คาบ)",
+  "alternative_options": [
+    "ย้าย 2-3 คาบจากวันอังคาร → วันศุกร์ เพื่อสมดุล",
+    "ตรวจสอบว่าครูท่านใดสอนติดกันเกิน 4 คาบ อาจปรับเพื่อลดความเหนื่อยล้า"
+  ],
+  "potential_issues": [
+    "อาจารย์สมชาย สอน 8 คาบ ในขณะที่อาจารย์อื่นสอน 3-4 คาบ",
+    "ห้อง 101 ใช้งานหนาแน่นมาก (12 คาบ/สัปดาห์)"
+  ],
+  "safety_check": "⚠️ ควรปรับสมดุลเพื่อประสิทธิภาพที่ดีขึ้น",
+  "confidence": 0.90
+}
+
+BE INTELLIGENT. THINK LIKE A HUMAN ADVISOR.
+`;
+
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: "user", content: analysisPrompt }],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.3,
+      response_format: { type: "json_object" },
+      max_tokens: 3000
+    });
+
+    let aiText = completion.choices[0]?.message?.content || "{}";
+    aiText = aiText.replace(/^```json/, '').replace(/```$/, '').trim();
+    const result = JSON.parse(aiText);
+    
+    console.log("🧠 AI Recommendation:", result);
+    return result;
+
+  } catch (error: any) {
+    console.error("❌ AI Recommendation Error:", error);
+    return {
+      query_type: "UNKNOWN",
+      understanding: "ไม่สามารถวิเคราะห์ได้",
+      smart_suggestion: "กรุณาลองใหม่อีกครั้ง",
+      confidence: 0
+    };
+  }
+}
+
+// ============================================
+// 🎯 MAIN API HANDLER
+// ============================================
 export async function POST(req: Request) {
   try {
     if (!process.env.GROQ_API_KEY) {
@@ -33,145 +191,136 @@ export async function POST(req: Request) {
     const { prompt, currentSchedule } = body;
 
     // ============================================
-    // 🧠 AI Parser: แปลงคำสั่งภาษาธรรมชาติ
+    // 🧠 CASE 1: วิเคราะห์ตาราง (ไม่แก้ไขอะไร)
     // ============================================
-    if (prompt && currentSchedule && isEditCommand(prompt)) {
+    if (isAnalysisQuery(prompt) && currentSchedule && currentSchedule.length > 0) {
+      console.log("🔍 Analysis Mode Activated");
+      
+      const analysis = await getAIRecommendation(prompt, currentSchedule);
+      
+      return NextResponse.json({
+        action: "ANALYZE",
+        message: "📊 วิเคราะห์ตารางเรียนเรียบร้อย",
+        ai_analysis: analysis.understanding,
+        insights: {
+          current_state: analysis.current_state,
+          main_suggestion: analysis.smart_suggestion,
+          alternatives: analysis.alternative_options || [],
+          warnings: analysis.potential_issues || [],
+          safety: analysis.safety_check
+        },
+        result: currentSchedule // ไม่เปลี่ยนตาราง
+      });
+    }
+
+    // ============================================
+    // 🧠 CASE 2: มีคำสั่งแก้ไขตาราง + มีตารางอยู่แล้ว
+    // ============================================
+    if (isEditCommand(prompt) && currentSchedule && currentSchedule.length > 0) {
+      console.log("✏️ Edit Mode Activated");
       return handleNaturalLanguageCommand(prompt, currentSchedule);
     }
 
     // ============================================
-    // 🤖 ถ้าไม่มี currentSchedule = สร้างตารางใหม่
+    // 🤖 CASE 3: สร้างตารางใหม่ทั้งหมด
     // ============================================
-    const client = await clientPromise;
-    const db = client.db("autotable");
-
-    // 1. ดึงข้อมูล
-    const [teachers, subjects, rooms, config] = await Promise.all([
-      db.collection("Teacher").find({}).project({_id:0, id:1, fullName:1}).toArray(),
-      db.collection("Subject").find({}).project({_id:0, id:1, nameTH:1, lectureHours:1}).toArray(),
-      db.collection("Room").find({}).project({_id:0, id:1, name:1}).toArray(),
-      db.collection("SchoolConfig").findOne({})
-    ]);
-
-    // 🚨 เช็ค Config
-    if (!config) {
-      return NextResponse.json({ 
-        error: "ไม่พบการตั้งค่า SchoolConfig กรุณาตั้งค่าโรงเรียนก่อน" 
-      }, { status: 400 });
+    if (!currentSchedule || currentSchedule.length === 0) {
+      console.log("🆕 Generate New Schedule Mode");
+      return await generateNewSchedule(prompt);
     }
 
-    // 2. 🔥 คำนวณ Slot เวลาอัตโนมัติ (มีพักเที่ยง)
-    const generatedSlots = [];
-    let current = timeToMinutes(config.startTime);
-    const end = timeToMinutes(config.endTime);
-    const duration = config.periodDuration;
-    let slotNo = 1;
+    // ============================================
+    // 🔄 CASE 4: มีตารางอยู่แล้ว แต่ไม่มีคำสั่ง
+    // ============================================
+    return NextResponse.json({
+      result: currentSchedule,
+      ai_analysis: "ไม่มีคำสั่งใหม่ ตารางยังคงเดิม",
+    });
 
-    // 🍽️ กำหนดเวลาพักเที่ยง (12:00-13:00)
-    const LUNCH_TIME_START = 720;  // 12:00 = 720 นาที
-    const LUNCH_TIME_END = 780;    // 13:00 = 780 นาที
+  } catch (error: any) {
+    console.error("❌ Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
 
-    while (current + duration <= end) {
-      const isLunchBreak = current >= LUNCH_TIME_START && current < LUNCH_TIME_END;
+// ============================================
+// 🆕 สร้างตารางใหม่
+// ============================================
+async function generateNewSchedule(prompt: string) {
+  const client = await clientPromise;
+  const db = client.db("autotable");
 
-      // ✅ ถ้าไม่ใช่พักเที่ยง ค่อยเพิ่มเข้า Array
-      if (!isLunchBreak) {
-        generatedSlots.push({
-          slotNo: slotNo,
-          startTime: minutesToTime(current),
-          endTime: minutesToTime(current + duration),
-          label: `Slot ${slotNo} (${minutesToTime(current)} - ${minutesToTime(current + duration)})`
-        });
-      }
-      
-      current += duration;
-      slotNo++;
+  const [teachers, subjects, rooms, config] = await Promise.all([
+    db.collection("Teacher").find({}).project({_id:0, id:1, fullName:1}).toArray(),
+    db.collection("Subject").find({}).project({_id:0, id:1, nameTH:1, lectureHours:1}).toArray(),
+    db.collection("Room").find({}).project({_id:0, id:1, name:1}).toArray(),
+    db.collection("SchoolConfig").findOne({})
+  ]);
+
+  if (!config) {
+    return NextResponse.json({ 
+      error: "ไม่พบการตั้งค่า SchoolConfig กรุณาตั้งค่าโรงเรียนก่อน" 
+    }, { status: 400 });
+  }
+
+  // สร้าง Slots
+  const generatedSlots = [];
+  let current = timeToMinutes(config.startTime);
+  const end = timeToMinutes(config.endTime);
+  const duration = config.periodDuration;
+  let slotNo = 1;
+
+  const LUNCH_TIME_START = 720;
+  const LUNCH_TIME_END = 780;
+
+  while (current + duration <= end) {
+    const isLunchBreak = current >= LUNCH_TIME_START && current < LUNCH_TIME_END;
+    if (!isLunchBreak) {
+      generatedSlots.push({
+        slotNo: slotNo,
+        startTime: minutesToTime(current),
+        endTime: minutesToTime(current + duration),
+        label: `Slot ${slotNo}`
+      });
     }
+    current += duration;
+    slotNo++;
+  }
 
-    console.log(`✅ Generated ${generatedSlots.length} teachable slots (excluded lunch break 12:00-13:00).`);
-
-    // 3. 🚀 เรียกใช้ Groq AI (Llama 3.3 70B) พร้อม Instruction ฉลาดขึ้น
-    const systemInstruction = `
+  const systemInstruction = `
 You are an ELITE University Scheduler Engine with OPTIMIZATION expertise.
 
 🎯 PRIMARY OBJECTIVE:
 Create the MOST EFFICIENT schedule by grouping consecutive hours of the same subject together.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 MANDATORY RULES (STRICTLY ENFORCE):
+📋 MANDATORY RULES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. ✅ CONSECUTIVE SLOTS RULE (MOST IMPORTANT!)
+1. ✅ CONSECUTIVE SLOTS RULE
    - Same Subject + Same Room + Same Teacher = BACK-TO-BACK SLOTS
    - BUT ⚠️ NEVER cross lunch break (12:00-13:00)!
-   - Example (CORRECT ✅):
-     * Subject "Database" (6 hours, Room 5, Teacher A):
-       → Mon Slot 1-2-3-4 (before lunch) + Mon Slot 6-7 (after lunch)
-       OR Mon Slot 1-2-3 + Tue Slot 1-2-3
-   
-   - Example (WRONG ❌):
-     * Subject "Database" (6 hours, Room 5, Teacher A):
-       → Mon Slot 1, Tue Slot 3, Wed Slot 5, Thu Slot 2, Fri Slot 4, Fri Slot 7
-       ❌ This is TERRIBLE! Too scattered!
 
 2. 🍽️ LUNCH BREAK RULE (12:00-13:00)
-   - Slot 5 (12:00-13:00) is LUNCH BREAK - NOT available for classes
-   - DO NOT schedule any classes during this time
-   - Classes can be scheduled: Slots 1-4 (morning) and Slots 6-8 (afternoon)
-   - NEVER schedule consecutive slots that cross lunch (e.g., Slot 4-5-6 ❌)
+   - Slot 5 is LUNCH BREAK - NOT available
 
 3. 🚫 NO GAPS IN SAME DAY
-   - If a subject appears multiple times on the SAME DAY, slots MUST be consecutive
-   - But respect lunch break! Split into morning block + afternoon block if needed
-   - Example (CORRECT ✅): Wed Slot 1-2-3 OR Wed Slot 6-7-8
-   - Example (WRONG ❌): Wed Slot 1, Wed Slot 7 (gap without lunch reason!)
+   - If subject appears multiple times on SAME DAY, slots MUST be consecutive
 
 4. 📊 BALANCED DISTRIBUTION
-   - Don't overload one day while leaving others empty
-   - Try to distribute subjects across Mon-Fri reasonably
-   - But ALWAYS prioritize consecutive slots over perfect balance
+   - Distribute subjects across Mon-Fri reasonably
 
 5. 🔒 CONFLICT PREVENTION
-   - Teachers cannot teach 2 classes at the same time
-   - Rooms cannot host 2 classes at the same time
-   - Every slot must have: valid day (Mon/Tue/Wed/Thu/Fri) + valid slotNo
+   - Teachers cannot teach 2 classes simultaneously
+   - Rooms cannot host 2 classes simultaneously
 
-6. 🎲 SMART SUBJECT ORDERING
-   - DO NOT schedule subjects in sequential order (S001, S002, S003...)
-   - Mix subjects intelligently based on room/teacher availability
-   - Group by room/teacher when possible to maximize efficiency
+INPUT DATA:
+Subjects: ${JSON.stringify(subjects, null, 2)}
+Teachers: ${JSON.stringify(teachers, null, 2)}
+Rooms: ${JSON.stringify(rooms, null, 2)}
+Available Timeslots: ${JSON.stringify(generatedSlots, null, 2)}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 OPTIMIZATION STRATEGY:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Step 1: Group subjects by room/teacher
-Step 2: For each subject, find CONSECUTIVE available slots (respecting lunch break!)
-Step 3: Schedule longest subjects first (6 hours → 3 hours → 2 hours → 1 hour)
-Step 4: Morning slots (1-4) and Afternoon slots (6-8) should be treated separately
-Step 5: Fill remaining gaps with smaller subjects
-Step 6: Verify no conflicts (teacher/room/time) and no lunch break violations
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📥 INPUT DATA:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Subjects (with lecture hours):
-${JSON.stringify(subjects, null, 2)}
-
-Teachers:
-${JSON.stringify(teachers, null, 2)}
-
-Rooms:
-${JSON.stringify(rooms, null, 2)}
-
-Available Timeslots:
-${JSON.stringify(generatedSlots, null, 2)}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📤 REQUIRED JSON RESPONSE FORMAT:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+RESPONSE FORMAT (JSON ONLY):
 {
   "schedule": [
     {
@@ -182,76 +331,39 @@ ${JSON.stringify(generatedSlots, null, 2)}
       "day": "Mon",
       "slotNo": 1,
       "time": "08:00-09:00"
-    },
-    {
-      "subject": "S001",
-      "subjectName": "หลักการเขียนโปรแกรม",
-      "teacher": "อาจารย์สมชาย",
-      "room": "ห้อง 1",
-      "day": "Mon",
-      "slotNo": 2,
-      "time": "09:00-10:00"
     }
   ],
-  "analysis": "Detailed explanation of your optimization strategy"
-}
+  "analysis": "Explanation"
+}`;
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ CRITICAL REMINDERS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  const completion = await groq.chat.completions.create({
+    messages: [{
+      role: "user",
+      content: systemInstruction + "\n\n🎯 USER COMMAND: " + (prompt || "Generate OPTIMIZED schedule")
+    }],
+    model: "llama-3.3-70b-versatile",
+    temperature: 0,
+    response_format: { type: "json_object" },
+    max_tokens: 8000
+  });
 
-- CONSECUTIVE SLOTS = TOP PRIORITY
-- Same subject hours MUST be grouped together
-- Minimize room/teacher switches
-- Balance is secondary to efficiency
-- Think like a human scheduler, not a robot
+  let aiText = completion.choices[0]?.message?.content || "{}";
+  aiText = aiText.replace(/^```json/, '').replace(/^```/, '').replace(/```$/, '').trim();
 
-Now generate the OPTIMIZED schedule!
-`;
-
-    const completion = await groq.chat.completions.create({
-      messages: [{
-        role: "user",
-        content: systemInstruction + "\n\n🎯 USER COMMAND: " + (prompt || "Generate OPTIMIZED schedule with CONSECUTIVE slots for same subjects")
-      }],
-      model: "llama-3.3-70b-versatile",
-      temperature: 0, // ✅ ไม่สุ่มเลย ให้แม่นยำสูงสุด
-      response_format: { type: "json_object" },
-      max_tokens: 8000 // ✅ เพิ่ม token limit เผื่อตารางใหญ่
-    });
-
-    let aiText = completion.choices[0]?.message?.content || "{}";
-    aiText = aiText.replace(/^```json/, '').replace(/^```/, '').replace(/```$/, '').trim();
-
-    const parsedResult = JSON.parse(aiText);
-
-    // 4. ✅ Validation (ตรวจสอบว่าตารางที่ได้มาถูกต้อง)
-    const schedule = parsedResult.schedule || [];
-    
-    console.log(`✅ Generated ${schedule.length} schedule entries`);
-    console.log(`📊 AI Analysis: ${parsedResult.analysis || 'No analysis provided'}`);
-
-    return NextResponse.json({ 
-      message: "Success", 
-      ai_analysis: parsedResult.analysis || "จัดตารางแบบ Optimized สำเร็จ",
-      result: schedule,
-      stats: {
-        totalEntries: schedule.length,
-        subjects: [...new Set(schedule.map((s: any) => s.subject))].length,
-        rooms: [...new Set(schedule.map((s: any) => s.room))].length,
-        teachers: [...new Set(schedule.map((s: any) => s.teacher))].length
-      },
-      config: {
-        startTime: config.startTime,
-        endTime: config.endTime,
-        periodDuration: config.periodDuration
-      } 
-    });
-
-  } catch (error: any) {
-    console.error("❌ Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  const parsedResult = JSON.parse(aiText);
+  const schedule = parsedResult.schedule || [];
+  
+  return NextResponse.json({ 
+    message: "Success", 
+    ai_analysis: parsedResult.analysis || "จัดตารางแบบ Optimized สำเร็จ",
+    result: schedule,
+    stats: {
+      totalEntries: schedule.length,
+      subjects: [...new Set(schedule.map((s: {subject: string}) => s.subject))].length,
+      rooms: [...new Set(schedule.map((s: {room: string}) => s.room))].length,
+      teachers: [...new Set(schedule.map((s: {teacher: string}) => s.teacher))].length
+    }
+  });
 }
 
 // ============================================
@@ -261,102 +373,247 @@ async function handleNaturalLanguageCommand(userPrompt: string, currentSchedule:
   try {
     console.log(`🧠 Parsing command: "${userPrompt}"`);
     
+    // 🧠 ขั้นตอนที่ 1: ให้ AI วิเคราะห์ก่อน
+    const aiAdvice = await getAIRecommendation(userPrompt, currentSchedule);
+    
+    console.log("💡 AI Advice:", aiAdvice.smart_suggestion);
+
     const parserInstruction = `
-    You are a Schedule Command Parser AI.
-    Your job is to understand user commands in Thai or English and convert them into structured JSON actions.
-    
-    CURRENT SCHEDULE SAMPLE (first 20 entries):
-    ${JSON.stringify(currentSchedule.slice(0, 20), null, 2)}
-    
-    TOTAL ENTRIES: ${currentSchedule.length}
-    
-    USER COMMAND TYPES:
-    1. MOVE - ย้ายคาบ
-    2. DELETE - ลบคาบ
-    3. ADD - เพิ่มคาบ
-    4. EDIT - แก้ไขคาบ
-    5. SWAP - สลับคาบ (Ex: "สลับคาบที่ 4 วันจันทร์ กับ คาบ 4 วันอังคาร")
-    
-    CRITICAL RULES:
-    - Always return {"action": "MOVE"|"DELETE"|"ADD"|"EDIT"|"SWAP", "parameters": {...}}
-    - For SWAP, return parameters: { "a": { "day": "Mon", "slot": 4 }, "b": { "day": "Tue", "slot": 4 } }
-    
-    RESPONSE FORMAT (JSON ONLY):
-    {
-      "action": "SWAP",
-      "confidence": 0.95,
-      "parameters": {
-        "a": { "day": "Mon", "slot": 4 },
-        "b": { "day": "Tue", "slot": 4 }
-      }
-    }
-    `;
+You are an INTELLIGENT Schedule Command Parser.
+
+CURRENT SCHEDULE (First 30 entries):
+${JSON.stringify(currentSchedule.slice(0, 30), null, 2)}
+
+TOTAL: ${currentSchedule.length} entries
+
+🎯 UNDERSTAND NATURAL COMMANDS:
+
+1️⃣ MOVE (ย้ายคาบ):
+   Examples:
+   - "ย้ายคาบ 8 วันจันทร์ไปคาบ 8 วันศุกร์"
+   - "ช่วยย้ายคาบ 6 ไปคาบ 3 วันจันทร์"
+   - "ย้ายคาบที่ 4 วันศุกร์ ไปคาบ 8"
+   
+   ⚠️ CRITICAL: If subject not mentioned in command:
+   → MUST find subject from CURRENT SCHEDULE at source position
+   → Example: "ย้ายคาบ 8 วันจันทร์" → Look at Mon Slot 8 → Find subject there
+   
+2️⃣ SWAP: "สลับคาบ 4 วันจันทร์ กับ คาบ 4 วันอังคาร"
+3️⃣ DELETE: "ลบคาบ 4 วันศุกร์"
+4️⃣ MOVE_MULTIPLE: "ย้ายคาบ 6 และ 7 วันพฤหัสบดี ไปคาบที่ 3 และ 4"
+
+DAY MAPPING (STRICT):
+"จันทร์"|"Monday"|"Mon"|"วันจันทร์" → "Mon"
+"อังคาร"|"Tuesday"|"Tue"|"วันอังคาร" → "Tue"
+"พุธ"|"Wednesday"|"Wed"|"วันพุธ" → "Wed"
+"พฤหัสบดี"|"พฤหัส"|"Thursday"|"Thu"|"วันพฤหัสบดี" → "Thu"
+"ศุกร์"|"Friday"|"Fri"|"วันศุกร์" → "Fri"
+
+RESPONSE FORMAT (JSON):
+For MOVE without subject mentioned:
+{
+  "action": "MOVE",
+  "confidence": 0.95,
+  "parameters": {
+    "subject": "AUTO_DETECT",
+    "fromDay": "Mon",
+    "fromSlot": 8,
+    "toDay": "Fri",
+    "toSlot": 8
+  },
+  "explanation": "ย้ายคาบ 8 วันจันทร์ ไป วันศุกร์ คาบ 8"
+}
+
+PARSING STEPS for "ย้ายคาบ 8 วันจันทร์ไปคาบ 8 วันศุกร์":
+1. Detect action: MOVE
+2. Extract numbers: 8 (source slot), 8 (target slot)
+3. Extract days: "วันจันทร์" → "Mon", "วันศุกร์" → "Fri"
+4. Subject not mentioned → use "AUTO_DETECT"
+5. Return: {action: "MOVE", parameters: {subject: "AUTO_DETECT", fromDay: "Mon", fromSlot: 8, toDay: "Fri", toSlot: 8}}
+`;
 
     const completion = await groq.chat.completions.create({
       messages: [{
         role: "user",
-        content: parserInstruction + `\n\nUSER COMMAND: "${userPrompt}"`
+        content: parserInstruction + `\n\n👤 USER: "${userPrompt}"`
       }],
       model: "llama-3.3-70b-versatile",
       temperature: 0,
-      response_format: { type: "json_object" }
+      response_format: { type: "json_object" },
+      max_tokens: 2000
     });
 
     let aiText = completion.choices[0]?.message?.content || "{}";
-    aiText = aiText.replace(/^```json/, '').replace(/^```/, '').replace(/```$/, '').trim();
+    aiText = aiText.replace(/^```json/, '').replace(/```$/, '').trim();
     const parsed = JSON.parse(aiText);
 
-    console.log(`✅ Parsed command:`, JSON.stringify(parsed, null, 2));
-
-    if (parsed.action === "UNKNOWN" || parsed.confidence < 0.5) {
+    if (parsed.action === "UNKNOWN" || !parsed.action || parsed.confidence < 0.6) {
       return NextResponse.json({
-        error: "ขอโทษครับ ไม่เข้าใจคำสั่ง กรุณาลองใหม่อีกครั้ง",
-        parsedCommand: parsed
+        error: "😕 ไม่ค่อยเข้าใจคำสั่ง",
+        ai_suggestion: aiAdvice.smart_suggestion,
+        suggestions: [
+          "ช่วยย้ายคาบ 6 ไปคาบ 3 วันจันทร์",
+          "สลับคาบ 4 วันจันทร์ กับ คาบ 4 วันอังคาร",
+          "ลบคาบ 4 วันศุกร์ออก"
+        ]
       }, { status: 400 });
     }
 
-    // Handle MOVE_MULTIPLE (ถ้ามี)
+    // ============================================
+    // 🧠 MOVE_MULTIPLE Handler
+    // ============================================
     if (parsed.action === "MOVE_MULTIPLE" && parsed.moves) {
-       // ... (Logic เดิมของคุณสำหรับ Move Multiple) ...
-       // ⚠️ อย่าเอา SWAP มาใส่ตรงนี้
-       return NextResponse.json({ message: "Not implemented yet for multiple moves" }); 
+      let updatedSchedule = [...currentSchedule];
+      const moveResults = [];
+
+      for (const move of parsed.moves) {
+        const result = await handleScheduleManagement({
+          action: "MOVE",
+          currentSchedule: updatedSchedule,
+          ...move
+        }, aiAdvice);
+        
+        const data = await result.json();
+        
+        if (result.status === 200) {
+          updatedSchedule = data.result;
+          moveResults.push(data.moved);
+        } else {
+          return NextResponse.json({
+            error: data.error,
+            partialMoves: moveResults,
+            ai_insight: aiAdvice
+          }, { status: result.status });
+        }
+      }
+
+      return NextResponse.json({
+        message: `✅ ย้ายคาบสำเร็จ ${moveResults.length} คาบ`,
+        action: "MOVE_MULTIPLE",
+        moved: moveResults,
+        explanation: parsed.explanation,
+        ai_insight: {
+          suggestion: aiAdvice.smart_suggestion,
+          warnings: aiAdvice.potential_issues
+        },
+        result: updatedSchedule
+      });
     }
 
-    // Execute single action
+    // ============================================
+    // 🔍 AUTO_DETECT: Find subject from schedule
+    // ============================================
+    let finalParams = { ...parsed.parameters };
+    
+    if (parsed.action === "MOVE" && finalParams.subject === "AUTO_DETECT") {
+      console.log("🔍 AUTO_DETECT: Finding subject at", finalParams.fromDay, "Slot", finalParams.fromSlot);
+      
+      const sourceEntry = currentSchedule.find((entry: any) => 
+        entry.day === finalParams.fromDay && 
+        entry.slotNo === finalParams.fromSlot
+      );
+      
+      if (!sourceEntry) {
+        return NextResponse.json({
+          error: `❌ ไม่พบคาบที่ ${finalParams.fromDay} คาบที่ ${finalParams.fromSlot}`,
+          suggestion: "ตรวจสอบว่าวันและคาบที่ระบุมีการเรียนอยู่จริงหรือไม่"
+        }, { status: 404 });
+      }
+      
+      finalParams.subject = sourceEntry.subject;
+      console.log(`✅ AUTO_DETECT: Found subject ${sourceEntry.subject} (${sourceEntry.subjectName})`);
+    }
+
     const body = {
       action: parsed.action,
       currentSchedule: currentSchedule,
-      ...parsed.parameters
+      ...finalParams
     };
 
-    console.log(`🚀 Executing action:`, body.action);
-    return handleScheduleManagement(body);
+    return handleScheduleManagement(body, aiAdvice);
 
   } catch (error: any) {
-    console.error("❌ Error parsing natural language:", error);
+    console.error("❌ Error:", error);
     return NextResponse.json({ 
-      error: "เกิดข้อผิดพลาดในการแปลคำสั่ง: " + error.message 
+      error: "⚠️ เกิดข้อผิดพลาด: " + error.message
     }, { status: 500 });
   }
 }
 
 // ============================================
-// 🎯 จัดการตาราง (CRUD Operations)
+// 🎯 Schedule Management (CRUD) + AI Insights
 // ============================================
-async function handleScheduleManagement(body: any) {
+async function handleScheduleManagement(body: any, aiAdvice?: any) {
   const { action, currentSchedule } = body;
 
   if (!currentSchedule) {
-    return NextResponse.json({ 
-      error: "กรุณาระบุ currentSchedule" 
-    }, { status: 400 });
+    return NextResponse.json({ error: "กรุณาระบุ currentSchedule" }, { status: 400 });
   }
 
   // ============================================
-  // 1️⃣ SWAP - สลับคาบ
+  // 🗑️ DELETE with AI Intelligence
+  // ============================================
+  if (action === 'DELETE') {
+    const { day, slotNo } = body;
+  
+    if (!day || typeof slotNo !== "number") {
+      return NextResponse.json(
+        { error: "❌ ต้องระบุวัน และเลขคาบให้ชัดเจน" },
+        { status: 400 }
+      );
+    }
+  
+    const targetEntry = currentSchedule.find(
+      (e: any) => e.day === day && e.slotNo === slotNo
+    );
+  
+    if (!targetEntry) {
+      return NextResponse.json(
+        { error: `ไม่พบคาบ ${day} คาบที่ ${slotNo}` },
+        { status: 404 }
+      );
+    }
+
+    // 🧠 ตรวจสอบว่ามีวิชาเดียวกันที่อื่นไหม
+    const sameSubjectOtherSlots = currentSchedule.filter(
+      (e: any) => e.subject === targetEntry.subject && 
+           !(e.day === day && e.slotNo === slotNo)
+    );
+
+    // 💡 สร้างคำแนะนำอัจฉริยะ
+    let smartInsight = "";
+    if (sameSubjectOtherSlots.length > 0) {
+      const locations = sameSubjectOtherSlots
+        .map((s: any) => `${s.day} คาบ${s.slotNo}`)
+        .join(', ');
+      smartInsight = `💡 ${targetEntry.subjectName} ยังมีอยู่ที่: ${locations} (${sameSubjectOtherSlots.length} คาบ)`;
+    } else {
+      smartInsight = `⚠️ ${targetEntry.subjectName} จะถูกลบออกจากตารางทั้งหมด! ไม่มีคาบอื่นเหลือ`;
+    }
+
+    const updatedSchedule = currentSchedule.filter(
+      (e: any) => !(e.day === day && e.slotNo === slotNo)
+    );
+  
+    return NextResponse.json({
+      message: "✅ ลบคาบสำเร็จ",
+      action: "DELETE",
+      deleted: targetEntry,
+      ai_insight: {
+        what_happened: smartInsight,
+        recommendation: aiAdvice?.smart_suggestion || "พิจารณาเพิ่มวิชาอื่นมาแทนที่ได้",
+        alternatives: aiAdvice?.alternative_options || [],
+        warnings: aiAdvice?.potential_issues || []
+      },
+      result: updatedSchedule
+    });
+  }
+
+  // ============================================
+  // 🔄 SWAP with Conflict Detection
   // ============================================
   if (action === 'SWAP') {
-    const { a, b } = body; // รับค่า a และ b
+    const { a, b } = body;
 
     if (!a || !b) {
       return NextResponse.json({ error: "ข้อมูลไม่ครบ (ต้องมี a และ b)" }, { status: 400 });
@@ -367,42 +624,75 @@ async function handleScheduleManagement(body: any) {
     const dayA = a.day;
     const dayB = b.day;
 
-    // หา index ของทั้งคู่
     const indexA = currentSchedule.findIndex((e: any) => e.day === dayA && e.slotNo === slotA);
     const indexB = currentSchedule.findIndex((e: any) => e.day === dayB && e.slotNo === slotB);
 
     let updatedSchedule = [...currentSchedule];
     let message = "";
+    
+    // แก้ไข typing ให้ชัดเจน
+    type ScheduleItem = {
+      subject: string;
+      subjectName: string;
+      teacher: string;
+      room: string;
+      day: string;
+      slotNo: number;
+    };
+    
+    const swappedItems: { itemA: ScheduleItem | null; itemB: ScheduleItem | null } = { 
+      itemA: null, 
+      itemB: null 
+    };
 
-    // กรณี 1: สลับวิชา <-> วิชา
     if (indexA !== -1 && indexB !== -1) {
+      // สลับ 2 คาบที่มีวิชา
+      swappedItems.itemA = { ...updatedSchedule[indexA] };
+      swappedItems.itemB = { ...updatedSchedule[indexB] };
+
       updatedSchedule[indexA] = { ...updatedSchedule[indexA], day: dayB, slotNo: slotB };
       updatedSchedule[indexB] = { ...updatedSchedule[indexB], day: dayA, slotNo: slotA };
-      message = `สลับวิชา ${updatedSchedule[indexA].subject} กับ ${updatedSchedule[indexB].subject} เรียบร้อย`;
-    } 
-    // กรณี 2: ย้าย A -> ที่ว่าง B
-    else if (indexA !== -1 && indexB === -1) {
+      message = `✅ สลับ ${swappedItems.itemA!.subjectName} กับ ${swappedItems.itemB!.subjectName}`;
+    } else if (indexA !== -1 && indexB === -1) {
+      swappedItems.itemA = { ...updatedSchedule[indexA] };
       updatedSchedule[indexA] = { ...updatedSchedule[indexA], day: dayB, slotNo: slotB };
-      message = `ย้าย ${updatedSchedule[indexA].subject} ไปที่ว่าง (${dayB} คาบ ${slotB})`;
-    }
-    // กรณี 3: ย้าย B -> ที่ว่าง A
-    else if (indexA === -1 && indexB !== -1) {
+      message = `✅ ย้าย ${swappedItems.itemA!.subjectName} ไปที่ว่าง`;
+    } else if (indexA === -1 && indexB !== -1) {
+      swappedItems.itemB = { ...updatedSchedule[indexB] };
       updatedSchedule[indexB] = { ...updatedSchedule[indexB], day: dayA, slotNo: slotA };
-      message = `ย้าย ${updatedSchedule[indexB].subject} มาที่ว่าง (${dayA} คาบ ${slotA})`;
+      message = `✅ ย้าย ${swappedItems.itemB!.subjectName} มาที่ว่าง`;
+    } else {
+      return NextResponse.json({ error: "ไม่พบข้อมูลในตำแหน่งที่ระบุ" }, { status: 404 });
     }
-    else {
-      return NextResponse.json({ error: "ไม่พบข้อมูลในตำแหน่งที่ระบุทั้งสองจุด" }, { status: 404 });
+
+    // 🧠 ตรวจสอบผลกระทบ
+    const teacherA = swappedItems.itemA?.teacher;
+    const teacherB = swappedItems.itemB?.teacher;
+    
+    const impactWarnings: string[] = [];
+    
+    if (teacherA) {
+      const teacherScheduleAfter = updatedSchedule.filter((e: any) => e.teacher === teacherA && e.day === dayB);
+      if (teacherScheduleAfter.length > 4) {
+        impactWarnings.push(`⚠️ ${teacherA} มีคาบสอนในวัน${dayB} เยอะขึ้น (${teacherScheduleAfter.length} คาบ)`);
+      }
     }
 
     return NextResponse.json({ 
       message, 
       action: "SWAP", 
+      swapped: swappedItems,
+      ai_insight: {
+        recommendation: aiAdvice?.smart_suggestion || "การสลับเสร็จสมบูรณ์",
+        warnings: impactWarnings.length > 0 ? impactWarnings : aiAdvice?.potential_issues || [],
+        safety: aiAdvice?.safety_check || "✅ ไม่พบความขัดแย้ง"
+      },
       result: updatedSchedule 
     });
   }
 
   // ============================================
-  // 2️⃣ MOVE - ย้ายคาบ
+  // ➡️ MOVE with Smart Validation
   // ============================================
   if (action === 'MOVE') {
     const { subject, fromDay, fromSlot, toDay, toSlot } = body;
@@ -427,7 +717,11 @@ async function handleScheduleManagement(body: any) {
 
     const conflict = checkConflicts(currentSchedule, toDay, toSlot, targetEntry, subject);
     if (conflict) {
-      return NextResponse.json({ error: conflict.error, conflict: conflict.entry }, { status: 409 });
+      return NextResponse.json({ 
+        error: conflict.error, 
+        conflict: conflict.entry,
+        ai_suggestion: aiAdvice?.smart_suggestion || "ลองเลือกคาบอื่นที่ว่าง"
+      }, { status: 409 });
     }
 
     const updatedSchedule = currentSchedule.map((entry: any) => {
@@ -438,7 +732,7 @@ async function handleScheduleManagement(body: any) {
     });
 
     return NextResponse.json({ 
-      message: "ย้ายคาบสำเร็จ",
+      message: "✅ ย้ายคาบสำเร็จ",
       action: "MOVE",
       moved: {
         subject: targetEntry.subject,
@@ -446,186 +740,53 @@ async function handleScheduleManagement(body: any) {
         from: `${fromDay} คาบที่ ${fromSlot}`,
         to: `${toDay} คาบที่ ${toSlot}`
       },
-      result: updatedSchedule
-    });
-  }
-
-  // ============================================
-  // 3️⃣ DELETE - ลบคาบ
-  // ============================================
-  if (action === 'DELETE') {
-    const { subject, day, slotNo } = body;
-
-    if (!subject || !day || !slotNo) {
-      return NextResponse.json({ 
-        error: "กรุณาระบุ: subject, day, slotNo" 
-      }, { status: 400 });
-    }
-
-    const targetEntry = currentSchedule.find((entry: any) => 
-      entry.subject === subject && 
-      entry.day === day && 
-      entry.slotNo === slotNo
-    );
-
-    if (!targetEntry) {
-      return NextResponse.json({ 
-        error: `ไม่พบคาบที่ต้องการลบ: ${subject} วัน ${day} คาบที่ ${slotNo}` 
-      }, { status: 404 });
-    }
-
-    const updatedSchedule = currentSchedule.filter((entry: any) => 
-      !(entry.subject === subject && entry.day === day && entry.slotNo === slotNo)
-    );
-
-    return NextResponse.json({ 
-      message: "ลบคาบสำเร็จ",
-      action: "DELETE",
-      deleted: {
-        subject: targetEntry.subject,
-        subjectName: targetEntry.subjectName,
-        day: day,
-        slotNo: slotNo
+      ai_insight: {
+        recommendation: aiAdvice?.smart_suggestion || "การย้ายเสร็จสมบูรณ์",
+        warnings: aiAdvice?.potential_issues || [],
+        safety: aiAdvice?.safety_check || "✅ ไม่พบความขัดแย้ง"
       },
       result: updatedSchedule
     });
   }
 
-  // ============================================
-  // 4️⃣ ADD - เพิ่มคาบ
-  // ============================================
-  if (action === 'ADD') {
-    const { subject, subjectName, teacher, room, day, slotNo, time } = body;
-
-    if (!subject || !subjectName || !teacher || !room || !day || !slotNo) {
-      return NextResponse.json({ 
-        error: "กรุณาระบุ: subject, subjectName, teacher, room, day, slotNo" 
-      }, { status: 400 });
-    }
-
-    const newEntry = { subject, subjectName, teacher, room, day, slotNo, time };
-
-    const conflict = checkConflicts(currentSchedule, day, slotNo, newEntry, null);
-    if (conflict) {
-      return NextResponse.json({ error: conflict.error, conflict: conflict.entry }, { status: 409 });
-    }
-
-    const updatedSchedule = [...currentSchedule, newEntry];
-
-    return NextResponse.json({ 
-      message: "เพิ่มคาบสำเร็จ",
-      action: "ADD",
-      added: newEntry,
-      result: updatedSchedule
-    });
-  }
-
-  // ============================================
-  // 5️⃣ EDIT - แก้ไขคาบ
-  // ============================================
-  if (action === 'EDIT') {
-    const { subject, day, slotNo, updates } = body;
-
-    if (!subject || !day || !slotNo || !updates) {
-      return NextResponse.json({ 
-        error: "กรุณาระบุ: subject, day, slotNo, updates (object)" 
-      }, { status: 400 });
-    }
-
-    const targetIndex = currentSchedule.findIndex((entry: any) => 
-      entry.subject === subject && 
-      entry.day === day && 
-      entry.slotNo === slotNo
-    );
-
-    if (targetIndex === -1) {
-      return NextResponse.json({ 
-        error: `ไม่พบคาบที่ต้องการแก้ไข: ${subject} วัน ${day} คาบที่ ${slotNo}` 
-      }, { status: 404 });
-    }
-
-    const updatedSchedule = [...currentSchedule];
-    updatedSchedule[targetIndex] = {
-      ...updatedSchedule[targetIndex],
-      ...updates
-    };
-
-    if (updates.day || updates.slotNo) {
-      const newDay = updates.day || day;
-      const newSlot = updates.slotNo || slotNo;
-      const conflict = checkConflicts(
-        updatedSchedule.filter((_, i) => i !== targetIndex), 
-        newDay, 
-        newSlot, 
-        updatedSchedule[targetIndex],
-        subject
-      );
-      if (conflict) {
-        return NextResponse.json({ error: conflict.error, conflict: conflict.entry }, { status: 409 });
-      }
-    }
-
-    return NextResponse.json({ 
-      message: "แก้ไขคาบสำเร็จ",
-      action: "EDIT",
-      updated: updatedSchedule[targetIndex],
-      result: updatedSchedule
-    });
-  }
-
-  // ⚠️ ส่วน Return Error ต้องอยู่ท้ายสุด และปิดปีกกาฟังก์ชันตรงนี้เท่านั้น
   return NextResponse.json({ 
-    error: `Action ไม่ถูกต้อง: ${action}. ใช้ได้เฉพาะ: MOVE, DELETE, ADD, EDIT, SWAP` 
+    error: `Action ไม่ถูกต้อง: ${action}` 
   }, { status: 400 });
 }
 
 // ============================================
-// 🛡️ Helper Function: ตรวจสอบความชน
+// 🛡️ Conflict Checker
 // ============================================
-function checkConflicts(
-  schedule: any[], 
-  day: string, 
-  slotNo: number, 
-  entry: any,
-  excludeSubject: string | null
-) {
+function checkConflicts(schedule: any[], day: string, slotNo: number, entry: any, excludeSubject: string | null) {
   const slotConflict = schedule.find((e: any) => 
-    e.day === day && 
-    e.slotNo === slotNo &&
-    e.subject !== excludeSubject
+    e.day === day && e.slotNo === slotNo && e.subject !== excludeSubject
   );
 
   if (slotConflict) {
     return {
-      error: `คาบ ${day} Slot ${slotNo} มีการเรียนอยู่แล้ว: ${slotConflict.subjectName}`,
+      error: `❌ คาบ ${day} Slot ${slotNo} มีการเรียนอยู่แล้ว: ${slotConflict.subjectName}`,
       entry: slotConflict
     };
   }
 
   const teacherConflict = schedule.find((e: any) => 
-    e.day === day && 
-    e.slotNo === slotNo && 
-    e.teacher === entry.teacher &&
-    e.subject !== excludeSubject
+    e.day === day && e.slotNo === slotNo && e.teacher === entry.teacher && e.subject !== excludeSubject
   );
 
   if (teacherConflict) {
     return {
-      error: `อาจารย์ ${entry.teacher} สอนอยู่แล้วในช่วงนี้: ${teacherConflict.subjectName}`,
+      error: `❌ อาจารย์ ${entry.teacher} สอนอยู่แล้วในช่วงนี้`,
       entry: teacherConflict
     };
   }
 
   const roomConflict = schedule.find((e: any) => 
-    e.day === day && 
-    e.slotNo === slotNo && 
-    e.room === entry.room &&
-    e.subject !== excludeSubject
+    e.day === day && e.slotNo === slotNo && e.room === entry.room && e.subject !== excludeSubject
   );
 
   if (roomConflict) {
     return {
-      error: `ห้อง ${entry.room} ถูกใช้งานอยู่แล้วในช่วงนี้: ${roomConflict.subjectName}`,
+      error: `❌ ห้อง ${entry.room} ถูกใช้งานอยู่แล้วในช่วงนี้`,
       entry: roomConflict
     };
   }
