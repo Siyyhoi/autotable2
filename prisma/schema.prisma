@@ -8,158 +8,66 @@ datasource db {
   provider = "mongodb"
 }
 
-// --- 1. User & Authentication ---
-
-model User {
-  id            String    @id @default(auto()) @map("_id") @db.ObjectId
-  name          String?
-  email         String?   @unique
-  password      String?
-  role          String    @default("USER")
-  image         String?
-  
-  // การเชื่อมโยง: เนื่องจาก Teacher ใช้ ID เป็น String (T001) เราจึงเชื่อมแบบปกติ
-  teacherId     String?   @unique 
-  teacherProfile Teacher? @relation(fields: [teacherId], references: [id])
-
-  createdPlans  SchedulePlan[]
+model Room {
+  id       String @id @default(auto()) @map("_id") @db.ObjectId
+  room_id  String @unique
+  room_name String
+  room_type String
 }
 
-// --- 2. Master Data (ข้อมูลหลักจาก CSV) ---
-
-model Teacher {
-  // ใช้ T001 เป็น ID แต่ต้อง Map เข้า _id ของ Mongo
-  id             String @id @map("_id") 
-  fullName       String
-  maxHours       Int
-  unavailable    String?
-  
-  user           User?
-  
-  subjects       SubjectTeacher[]
-  schedules      ScheduleSlot[]
+model StudentGroup {
+  id          String     @id @default(auto()) @map("_id") @db.ObjectId
+  group_id    String     @unique
+  group_name  String
+  group_count Int
+  advisor     String
+  registers   Register[]
 }
 
 model Subject {
-  // ใช้ S001 เป็น ID
-  id             String @id @map("_id")
-  nameTH         String
-  nameEN         String?
-  lectureHours   Int
-  labHours       Int
-  totalHours     Int
-  
-  recommendedYear Int @default(1) 
-
-  reqComputer    Boolean @default(false)
-  reqNetwork     Boolean @default(false)
-  reqBusiness    Boolean @default(false)
-  
-  teachers       SubjectTeacher[]
-  schedules      ScheduleSlot[]
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  subject_id   String     @unique
+  subject_name String
+  theory       Int
+  practice     Int
+  credit       Int
+  teaches      Teach[]
+  registers    Register[]
 }
 
-// แก้ไข: MongoDB ไม่รองรับ Composite Key (@@id) 
-// เราต้องสร้าง ID ของตารางนี้ขึ้นมาเอง
-model SubjectTeacher {
-  id             String  @id @default(auto()) @map("_id") @db.ObjectId
-  
-  teacherId      String
-  subjectId      String
-  
-  teacher        Teacher @relation(fields: [teacherId], references: [id])
-  subject        Subject @relation(fields: [subjectId], references: [id])
-
-  // สร้าง unique constraint แทน @@id เพื่อป้องกันข้อมูลซ้ำ
-  @@unique([teacherId, subjectId])
-}
-
-model Room {
-  // ใช้ R001 เป็น ID
-  id             String @id @map("_id")
-  name           String
-  type           String
-  capacity       Int
-  schedules      ScheduleSlot[]
-}
-
-model SchoolConfig {
-  id             String   @id @default(auto()) @map("_id") @db.ObjectId
-  schoolName     String
-  startTime      String
-  endTime        String
-  periodDuration Int      // ระยะเวลาต่อคาบ (นาที)
-  updatedAt      DateTime @default(now())
+model Teacher {
+  id           String  @id @default(auto()) @map("_id") @db.ObjectId
+  teacher_id   String  @unique
+  teacher_name String
+  role         String
+  teaches      Teach[]
 }
 
 model Timeslot {
-  // MongoDB ต้องใช้แบบนี้เท่านั้น ไม่รองรับ Int autoincrement
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  day       String
-  slotNo    Int
-  startTime String
-  endTime   String
-
-  @@unique([day, slotNo])
-}
-
-// --- 3. Scheduling Data ---
-
-model SchedulePlan {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  name        String
-  description String?
-  
-  createdById String   @db.ObjectId // ต้องตรงกับ type ของ User.id
-  createdBy   User     @relation(fields: [createdById], references: [id])
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  versions    ScheduleVersion[]
-}
-
-model ScheduleVersion {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  
-  planId      String   @db.ObjectId
-  plan        SchedulePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  
-  versionName String
-  isFinal     Boolean  @default(false)
-  
-  aiLog       Json?
-  
-  createdAt   DateTime @default(now())
-  slots       ScheduleSlot[]
-}
-
-model ScheduleSlot {
-  // แก้ไข: เปลี่ยนจาก Int autoincrement เป็น String ObjectId
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  
-  versionId   String   @db.ObjectId
-  version     ScheduleVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  
+  id          String @id @default(auto()) @map("_id") @db.ObjectId
+  timeslot_id String @unique
   day         String
-  startTime   String
-  duration    Int
-  
-  subjectId   String
-  subject     Subject  @relation(fields: [subjectId], references: [id])
-  
-  teacherId   String
-  teacher     Teacher  @relation(fields: [teacherId], references: [id])
-  
-  roomId      String
-  room        Room     @relation(fields: [roomId], references: [id])
-  
-  forClassYear Int     @default(1)
+  period      Int
+  start       String
+  end         String
 }
 
-model ChatLog {
-  id         String   @id @default(auto()) @map("_id") @db.ObjectId
-  prompt     String   
-  aiAnalysis String?
-  createdAt  DateTime @default(now())
+model Teach {
+  id         String  @id @default(auto()) @map("_id") @db.ObjectId
+  teacher_id String
+  subject_id String
+  teacher    Teacher @relation(fields: [teacher_id], references: [teacher_id])
+  subject    Subject @relation(fields: [subject_id], references: [subject_id])
+
+  @@unique([teacher_id, subject_id])
+}
+
+model Register {
+  id         String       @id @default(auto()) @map("_id") @db.ObjectId
+  group_id   String
+  subject_id String
+  group      StudentGroup @relation(fields: [group_id], references: [group_id])
+  subject    Subject      @relation(fields: [subject_id], references: [subject_id])
+
+  @@unique([group_id, subject_id])
 }
