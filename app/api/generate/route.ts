@@ -244,6 +244,85 @@ export async function POST(req: Request) {
 }
 
 // ============================================
+// ✅ Constraint Validation Function
+// ============================================
+function validateScheduleConstraints(schedule: any[], teachers: any[], subjects: any[], rooms: any[], timeslots: any[]) {
+  const violations: string[] = [];
+  const warnings: string[] = [];
+
+  // Constraint 1-4: จำนวนคาบต้องตรงกับ theory + practice
+  subjects.forEach((subj: any) => {
+    const sId = subj.subject_id || subj.id || subj._id;
+    const actual = schedule.filter((s: any) => s.subject === sId || s.subject === String(sId)).length;
+    const expected = (subj.theory || 0) + (subj.practice || 0);
+    if (actual !== expected) {
+      violations.push(`❌ Constraint 1-4: ${subj.subject_name} has ${actual} periods (expected ${expected})`);
+    }
+  });
+
+  // Constraint 5: Max 10 periods per day
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  days.forEach(day => {
+    const count = schedule.filter((s: any) => s.day === day).length;
+    if (count > 10) {
+      violations.push(`❌ Constraint 5: ${day} has ${count} periods (max 10)`);
+    }
+  });
+
+  // Constraint 7: No overlapping teachers/rooms
+  const teacherSlots = new Set<string>();
+  const roomSlots = new Set<string>();
+  schedule.forEach((entry: any) => {
+    const teacherKey = `${entry.teacher}-${entry.day}-${entry.period}`;
+    const roomKey = `${entry.room}-${entry.day}-${entry.period}`;
+
+    if (teacherSlots.has(teacherKey)) {
+      violations.push(`❌ Constraint 7: Teacher ${entry.teacher} double-booked at ${entry.day} period ${entry.period}`);
+    }
+    if (roomSlots.has(roomKey)) {
+      violations.push(`❌ Constraint 7: Room ${entry.room} double-booked at ${entry.day} period ${entry.period}`);
+    }
+
+    teacherSlots.add(teacherKey);
+    roomSlots.add(roomKey);
+  });
+
+  // Constraint 9: Theory → Theory room, Practice → Lab
+  schedule.forEach((entry: any) => {
+    const room = rooms.find((r: any) => r.room_name === entry.room || r.room_id === entry.room);
+    if (room) {
+      if (entry.type === "Practice" && room.room_type !== "Practice" && room.room_type !== "Lab") {
+        warnings.push(`⚠️ Constraint 9: Practice class in non-lab room (${entry.room})`);
+      }
+      if (entry.type === "Lecture" && (room.room_type === "Practice" || room.room_type === "Lab")) {
+        warnings.push(`⚠️ Constraint 9: Theory class in lab room (${entry.room})`);
+      }
+    }
+  });
+
+  // Constraint 12: Wed 15:00-17:00 should be free (periods 8-9)
+  const wedActivity = schedule.filter((s: any) => s.day === "Wed" && (s.period === 8 || s.period === 9));
+  if (wedActivity.length > 0) {
+    violations.push(`❌ Constraint 12: Found ${wedActivity.length} classes during Wed activity time (should be 0)`);
+  }
+
+  // Constraint 15: No theory after 17:00 (period >= 9)
+  const lateTheory = schedule.filter((s: any) => s.type === "Lecture" && s.period >= 9);
+  if (lateTheory.length > 0) {
+    warnings.push(`⚠️ Constraint 15: ${lateTheory.length} theory classes after 17:00`);
+  }
+
+  return {
+    passed: violations.length === 0,
+    violations,
+    warnings,
+    summary: violations.length === 0
+      ? `✅ ผ่านการตรวจสอบทั้งหมด (${warnings.length} warnings)`
+      : `❌ พบข้อผิดพลาด ${violations.length} รายการ`
+  };
+}
+
+// ============================================
 // 🆕 สร้างตารางใหม่
 // ============================================
 // ============================================
@@ -279,6 +358,10 @@ async function generateNewSchedule(prompt: string) {
   const busyTeachers = new Set<string>(); // key: "TeacherID-Day-Period"
   const busyRooms = new Set<string>();    // key: "RoomID-Day-Period"
   const busyGroups = new Set<string>();   // key: "Year-Day-Period" (สมมติแยกตามชั้นปี)
+
+  // 🔧 FIX: Track room usage to ensure fair distribution
+  const roomUsage = new Map<string, number>(); // room_id -> usage count
+  rooms.forEach((r: any) => roomUsage.set(r.room_id, 0));
 
   const markBusy = (teacherId: string, roomId: string, year: number | string, day: string, period: number) => {
     busyTeachers.add(`${teacherId}-${day}-${period}`);
@@ -441,11 +524,20 @@ async function generateNewSchedule(prompt: string) {
 
         if (!pickedTeacher) continue; // ครูไม่ว่างสักคนในคาบนี้
 
-        for (const room of validRooms) {
-          if (isFree(pickedTeacher, room.room_id, year, day, period)) {
-            pickedRoom = room;
-            break;
-          }
+        // 🔧 FIX: Pick LEAST-USED room from validRooms to distribute fairly
+        const availableRooms = validRooms.filter((room: any) =>
+          isFree(pickedTeacher, room.room_id, year, day, period)
+        );
+
+        if (availableRooms.length > 0) {
+          // Sort by usage count (ascending) and pick the least used
+          availableRooms.sort((a: any, b: any) =>
+            (roomUsage.get(a.room_id) || 0) - (roomUsage.get(b.room_id) || 0)
+          );
+          pickedRoom = availableRooms[0];
+
+          // Increment usage count
+          roomUsage.set(pickedRoom.room_id, (roomUsage.get(pickedRoom.room_id) || 0) + 1);
         }
 
         if (pickedTeacher && pickedRoom) {
@@ -481,14 +573,31 @@ async function generateNewSchedule(prompt: string) {
     }
   }
 
-  // 6. Return Schedule
+  // 6. Validate Schedule Against Constraints
+  const validation = validateScheduleConstraints(schedule, teachers, subjects, rooms, timeslots);
+
+  // 7. Log room usage for debugging
+  console.log("📊 Room Usage Distribution:");
+  roomUsage.forEach((count, roomId) => {
+    if (count > 0) console.log(`   ${roomId}: ${count} times`);
+  });
+
+  // 8. Return Schedule with Validation
   return NextResponse.json({
     message: "Success (Logic-Based)",
-    ai_analysis: "สร้างตารางตามกฎ 15 ข้อ",
+    ai_analysis: `สร้างตารางตามกฎ 15 ข้อ - ${validation.summary}`,
     result: schedule,
     stats: {
       totalEntries: schedule.length,
-      subjects: [...new Set(schedule.map((s: { subject: string }) => s.subject))].length
+      subjects: [...new Set(schedule.map((s: { subject: string }) => s.subject))].length,
+      roomsUsed: Array.from(roomUsage.entries())
+        .filter(([_, count]) => count > 0)
+        .map(([roomId, count]) => ({ roomId, usage: count }))
+    },
+    validation: {
+      passed: validation.passed,
+      violations: validation.violations,
+      warnings: validation.warnings
     }
   });
 }
