@@ -1,18 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Users, User, X, ChevronLeft, Trash2, Pencil, Clock, CalendarOff } from "lucide-react";
+// ✅ แก้ไข: เปลี่ยน BadgeID เป็น IdCard
+import { Plus, Users, X, ChevronLeft, Trash2, Pencil, IdCard } from "lucide-react";
 
 interface ConfigTeacherProps {
   onClose: () => void;
 }
 
 export default function ConfigTeacher({ onClose }: ConfigTeacherProps) {
+  // ✅ 1. Interface ตรงกับ Prisma Model: Teacher
   interface Teacher {
-    id: string;
-    fullName: string;
-    maxHours: number;
-    unavailable: string; // เก็บเป็น string ตามโจทย์ "Wed-3;Fri-4"
+    teacher_id: string;
+    teacher_name: string;
+    role: string;
   }
 
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -20,12 +21,11 @@ export default function ConfigTeacher({ onClose }: ConfigTeacherProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
-  // Form State
+  // ✅ 2. Form Data
   const [formData, setFormData] = useState({
-    id: "",
-    fullName: "",
-    maxHours: 15, // Default load
-    unavailable: "",
+    teacher_id: "",
+    teacher_name: "",
+    role: "อาจารย์ที่ปรึกษา", // Default
   });
 
   useEffect(() => {
@@ -48,17 +48,16 @@ export default function ConfigTeacher({ onClose }: ConfigTeacherProps) {
 
   const handleOpenAdd = () => {
     setIsEditing(false);
-    setFormData({ id: "", fullName: "", maxHours: 15, unavailable: "" });
+    setFormData({ teacher_id: "", teacher_name: "", role: "อาจารย์ที่ปรึกษา" });
     setIsModalOpen(true);
   };
 
   const handleOpenEdit = (teacher: Teacher) => {
     setIsEditing(true);
     setFormData({
-      id: teacher.id,
-      fullName: teacher.fullName,
-      maxHours: teacher.maxHours,
-      unavailable: teacher.unavailable || "",
+      teacher_id: teacher.teacher_id,
+      teacher_name: teacher.teacher_name,
+      role: teacher.role,
     });
     setIsModalOpen(true);
   };
@@ -130,37 +129,31 @@ export default function ConfigTeacher({ onClose }: ConfigTeacherProps) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
             {teachers.map((t) => (
-              <div key={t.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-lg transition-all relative overflow-hidden group">
+              <div key={t.teacher_id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-lg transition-all relative overflow-hidden group">
                 
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xl">
-                    {t.fullName.charAt(0)}
+                    {t.teacher_name.charAt(0)}
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-gray-800 line-clamp-1">{t.fullName}</h3>
-                    <p className="text-sm text-indigo-500 font-medium">{t.id}</p>
+                    <h3 className="text-lg font-bold text-gray-800 line-clamp-1">{t.teacher_name}</h3>
+                    <p className="text-sm text-indigo-500 font-medium">{t.teacher_id}</p>
                   </div>
                 </div>
 
                 <div className="space-y-2 mb-4">
                     <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-lg">
-                        <Clock className="w-4 h-4 text-gray-400" />
-                        <span>ภาระงานสูงสุด: <span className="font-bold text-gray-800">{t.maxHours}</span> ชม.</span>
+                        {/* ✅ แก้ไข: ใช้ IdCard แทน BadgeID */}
+                        <IdCard className="w-4 h-4 text-gray-400" />
+                        <span>ตำแหน่ง: <span className="font-bold text-gray-800">{t.role}</span></span>
                     </div>
-                    
-                    {t.unavailable && (
-                        <div className="flex items-start gap-2 text-xs text-red-500 bg-red-50 p-2 rounded-lg">
-                            <CalendarOff className="w-4 h-4 mt-0.5 shrink-0" />
-                            <span className="break-all">{t.unavailable}</span>
-                        </div>
-                    )}
                 </div>
 
                 <div className="flex items-center justify-end border-t pt-3 border-gray-100 gap-1">
                     <button onClick={() => handleOpenEdit(t)} className="p-1.5 text-gray-400 hover:text-amber-500 bg-gray-50 rounded-md">
                         <Pencil className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(t.id)} className="p-1.5 text-gray-400 hover:text-red-500 bg-gray-50 rounded-md">
+                    <button onClick={() => handleDelete(t.teacher_id)} className="p-1.5 text-gray-400 hover:text-red-500 bg-gray-50 rounded-md">
                         <Trash2 className="w-4 h-4" />
                     </button>
                 </div>
@@ -179,19 +172,12 @@ export default function ConfigTeacher({ onClose }: ConfigTeacherProps) {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                     <div>
+                <div className="grid grid-cols-1 gap-4">
+                      <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">รหัสอาจารย์</label>
                         <input required type="text" readOnly={isEditing} 
                             className={`w-full border rounded-lg p-2 ${isEditing ? 'bg-gray-100' : ''}`}
-                            value={formData.id} onChange={(e) => setFormData({ ...formData, id: e.target.value })} 
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">ภาระงาน (ชม.)</label>
-                        <input required type="number" min="1"
-                            className="w-full border rounded-lg p-2"
-                            value={formData.maxHours} onChange={(e) => setFormData({ ...formData, maxHours: Number(e.target.value) })}
+                            value={formData.teacher_id} onChange={(e) => setFormData({ ...formData, teacher_id: e.target.value })} 
                         />
                     </div>
                 </div>
@@ -199,20 +185,18 @@ export default function ConfigTeacher({ onClose }: ConfigTeacherProps) {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล</label>
                   <input required type="text" className="w-full border rounded-lg p-2"
-                    placeholder="เช่น อาจารย์ใจดี มีสุข"
-                    value={formData.fullName} onChange={(e) => setFormData({ ...formData, fullName: e.target.value })} />
+                    value={formData.teacher_name} onChange={(e) => setFormData({ ...formData, teacher_name: e.target.value })} />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ช่วงเวลาที่ไม่ว่าง (Unavailable)</label>
-                  <input type="text" className="w-full border rounded-lg p-2"
-                    placeholder="เช่น Wed-3;Fri-4"
-                    value={formData.unavailable} onChange={(e) => setFormData({ ...formData, unavailable: e.target.value })} />
-                    <p className="text-xs text-gray-400 mt-1">ระบุรูปแบบ: วัน-คาบ (คั่นด้วย ;)</p>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ตำแหน่ง (Role)</label>
+                  <input required type="text" className="w-full border rounded-lg p-2"
+                    placeholder="เช่น อาจารย์ที่ปรึกษา, หัวหน้าสาขา"
+                    value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} />
                 </div>
 
                 <button type="submit" className={`w-full mt-4 py-3 rounded-xl font-bold shadow-lg text-white ${isEditing ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
-                  {isEditing ? "บันทึกการแก้ไข" : "บันทึกข้อมูลอาจารย์"}
+                  {isEditing ? "บันทึกการแก้ไข" : "บันทึกอาจารย์"}
                 </button>
               </form>
             </div>

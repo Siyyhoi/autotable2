@@ -16,6 +16,9 @@ export async function GET() {
       .sort({ period: 1 }) // เรียงตาม period (คาบที่)
       .toArray();
 
+    // 3. ดึง Student Groups ทั้งหมด (เพิ่มใหม่)
+    const groups = await db.collection("StudentGroup").find({}).toArray();
+
     return NextResponse.json({
       schoolName: config?.schoolName || "My School",
       slots: slots.map(s => ({
@@ -23,6 +26,12 @@ export async function GET() {
         startTime: s.start,
         endTime: s.end,
         label: `คาบที่ ${s.period}`
+      })),
+      groups: groups.map(g => ({
+        group_id: g.group_id,
+        group_name: g.group_name,
+        advisor: g.advisor,
+        student_count: g.group_count || 0
       }))
     });
 

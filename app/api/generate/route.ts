@@ -196,21 +196,29 @@ export async function POST(req: Request) {
     if (isAnalysisQuery(prompt) && currentSchedule && currentSchedule.length > 0) {
       console.log("🔍 Analysis Mode Activated");
 
-      const analysis = await getAIRecommendation(prompt, currentSchedule);
+      try {
+        const analysis = await getAIRecommendation(prompt, currentSchedule);
 
-      return NextResponse.json({
-        action: "ANALYZE",
-        message: "📊 วิเคราะห์ตารางเรียนเรียบร้อย",
-        ai_analysis: analysis.understanding,
-        insights: {
-          current_state: analysis.current_state,
-          main_suggestion: analysis.smart_suggestion,
-          alternatives: analysis.alternative_options || [],
-          warnings: analysis.potential_issues || [],
-          safety: analysis.safety_check
-        },
-        result: currentSchedule // ไม่เปลี่ยนตาราง
-      });
+        return NextResponse.json({
+          action: "ANALYZE",
+          message: "📊 วิเคราะห์ตารางเรียนเรียบร้อย",
+          ai_analysis: analysis.understanding,
+          insights: {
+            current_state: analysis.current_state,
+            main_suggestion: analysis.smart_suggestion,
+            alternatives: analysis.alternative_options || [],
+            warnings: analysis.potential_issues || [],
+            safety: analysis.safety_check
+          },
+          result: currentSchedule // ไม่เปลี่ยนตาราง
+        });
+      } catch (groqError: any) {
+        console.error("❌ Groq API Error (Analysis):", groqError.message);
+        return NextResponse.json({
+          message: "⚠️ ไม่สามารถวิเคราะห์ได้ (API Key อาจหมดอายุ) แต่ตารางยังคงเดิม",
+          result: currentSchedule
+        });
+      }
     }
 
     // ============================================
@@ -222,11 +230,11 @@ export async function POST(req: Request) {
     }
 
     // ============================================
-    // 🤖 CASE 3: สร้างตารางใหม่ทั้งหมด
+    // 🤖 CASE 3: สร้างตารางใหม่ทั้งหมด (แยกตาม Group)
     // ============================================
     if (!currentSchedule || currentSchedule.length === 0) {
-      console.log("🆕 Generate New Schedule Mode");
-      return await generateNewSchedule(prompt);
+      console.log("🆕 Generate Group-Based Schedules Mode");
+      return await generateSchedulesForAllGroups(prompt);
     }
 
     // ============================================
@@ -323,23 +331,102 @@ function validateScheduleConstraints(schedule: any[], teachers: any[], subjects:
 }
 
 // ============================================
-// 🆕 สร้างตารางใหม่
+// 🆕 สร้างตารางแยกตาม StudentGroup
 // ============================================
-// ============================================
-// 🆕 สร้างตารางใหม่ (Logic-Based)
-// ============================================
-async function generateNewSchedule(prompt: string) {
+async function generateSchedulesForAllGroups(prompt: string) {
   const client = await clientPromise;
   const db = client.db("autotable");
 
-  // 1. ดึงข้อมูลทั้งหมด
-  const [teachers, subjects, rooms, config, timeslots] = await Promise.all([
+  // 1. ดึงข้อมูล StudentGroups ทั้งหมด
+  const groups = await db.collection("StudentGroup").find({}).toArray();
+
+  if (groups.length === 0) {
+    return NextResponse.json({
+      error: "❌ ไม่พบกลุ่มนักเรียนในฐานข้อมูล กรุณาเพิ่ม StudentGroup ก่อน",
+      suggestion: "ใช้ import_excel.ts เพื่อนำเข้าข้อมูลจากไฟล์ Excel"
+    }, { status: 400 });
+  }
+
+  console.log(`📚 Found ${groups.length} student groups`);
+
+  // 2. สร้างตารางสำหรับแต่ละ Group
+  const groupSchedules = [];
+
+  for (const group of groups) {
+    console.log(`\n🎓 Generating schedule for ${group.group_name} (${group.group_id})`);
+
+    const groupSchedule = await generateScheduleForGroup(db, group);
+    groupSchedules.push(groupSchedule);
+  }
+
+  // 3. Return ตารางทั้งหมด
+  return NextResponse.json({
+    message: `✅ สร้างตารางสำเร็จ ${groupSchedules.length} กลุ่ม`,
+    groups: groupSchedules.map(gs => ({
+      group_id: gs.group_id,
+      group_name: gs.group_name,
+      totalClasses: gs.schedule.length
+    })),
+    result: groupSchedules
+  });
+}
+
+// ============================================
+// 🎯 สร้างตารางสำหรับ 1 Group
+// ============================================
+async function generateScheduleForGroup(db: any, group: any) {
+  const { group_id, group_name, advisor } = group;
+
+  // 1. ดึงข้อมูลทั่วไป
+  const [teachers, rooms, timeslots] = await Promise.all([
     db.collection("Teacher").find({}).toArray(),
-    db.collection("Subject").find({}).toArray(),
     db.collection("Room").find({}).toArray(),
-    db.collection("SchoolConfig").findOne({}),
     db.collection("Timeslot").find({}).sort({ period: 1 }).toArray()
   ]);
+
+  // 2. ดึงวิชาที่ Group นี้ลงทะเบียน
+  const registers = await db.collection("Register").find({ group_id }).toArray();
+  const subjectIds = registers.map((r: any) => r.subject_id);
+
+  const subjects = await db.collection("Subject").find({
+    subject_id: { $in: subjectIds }
+  }).toArray();
+
+  console.log(`   📖 ${group_name} registered ${subjects.length} subjects`);
+
+  // 3. เรียกใช้ logic เดิมในการสร้างตารางด:\Projects\autotable2\app\api\generate\route.ts (แต่ส่ง subjects ที่กรองแล้ว)
+  const scheduleData = await generateScheduleLogic({
+    db,
+    teachers,
+    subjects,
+    rooms,
+    timeslots,
+    groupInfo: { group_id, group_name, advisor }
+  });
+
+  return {
+    group_id,
+    group_name,
+    advisor,
+    schedule: scheduleData.schedule,
+    validation: scheduleData.validation,
+    stats: scheduleData.stats
+  };
+}
+
+// ============================================
+// ============================================
+// 🎯 Core Schedule Generation Logic (Reusable)
+// ============================================
+async function generateScheduleLogic(params: {
+  db: any;
+  teachers: any[];
+  subjects: any[];
+  rooms: any[];
+  timeslots: any[];
+  groupInfo?: { group_id: string; group_name: string; advisor: string };
+}) {
+  const { db, teachers, subjects, rooms, timeslots, groupInfo } = params;
 
   // 2. เตรียม Grid ตารางเรียน (5 วัน x 10 คาบ)
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
@@ -349,7 +436,9 @@ async function generateNewSchedule(prompt: string) {
     ? Math.max(...timeslots.map((t: any) => t.period))
     : 10;
 
-  console.log(`✅ Using Max Periods: ${maxPeriods} (from ${timeslots.length} slots)`);
+  console.log(`✅ Using Max Periods: ${maxPeriods} (from ${timeslots.length} slots)`)
+
+    ;
 
   // โครงสร้าง Schedule ที่จะ Return
   const schedule: any[] = [];
@@ -376,25 +465,123 @@ async function generateNewSchedule(prompt: string) {
     return true;
   };
 
-  // 3. ลงตาราง Block บังคับ (Fixed Constraints)
+  // 3. ลงตาราง Block บังคับ (Fixed Constraints) + แสดงใน Schedule
 
-  // 3.1 พักเที่ยง (คาบ 5) - Block ทุกคน
+  // 3.1 พักเที่ยง (คาบ 5) - Block ทุกคน (ไม่แสดงในตาราง)
   days.forEach(day => {
-    // เราไม่ใส่ลงใน schedule output แต่เราจะไม่ลงเรียนในคาบนี้
-    // แต่เพื่อให้ระบบเช็คว่าไม่ว่าง เราอาจจะ markBusy ไว้หลอกๆ หรือแค่ข้าม Loop
+    // ไม่ใส่ในตาราง เพียงแต่ skip ในการจัดวิชา
   });
 
-  // 3.2 กิจกรรม (พุธ คาบ 8-9) - Block ทุกคน
+  // 3.2 🏫 Homeroom (วันจันทร์ คาบ 1)
+  // ปกติโรงเรียนจะมี Homeroom คาบแรกวันจันทร์
+  const homeroomSlot = timeslots.find((t: any) => t.period === 1);
+  const homeroomTime = homeroomSlot ? `${homeroomSlot.start}-${homeroomSlot.end}` : "Period 1";
+
+  // ใช้ advisor ของ group (ถ้ามี) หรือใช้ชื่อทั่วไป
+  const advisorName = groupInfo?.advisor || "ครูที่ปรึกษา";
+
+  schedule.push({
+    subject: "HOME ROOM",
+    subjectName: "ชั้นเรียน (Homeroom)",
+    teacher: advisorName,
+    room: "ห้องเรียน",
+    day: "Mon",
+    period: 1,
+    slotNo: 1,
+    time: homeroomTime,
+    type: "Activity"
+  });
+
+  // Mark busy to prevent scheduling conflicts
+  markBusy("HOMEROOM", "HOMEROOM_ROOM", "ALL", "Mon", 1);
+
+  // 3.3 🎨 กิจกรรม (พุธ คาบ 8-9)
   // Constraint 12: รายกิจกรรมต้องถูกจัดลงทุกวันพุธ เวลา 15:00-17:00 (คาบ 8 - 9)
-  // สมมติคาบ 8=15:00, 9=16:00
-  ["Mon", "Tue", "Wed", "Thu", "Fri"].forEach(year => { // Loop year instead if needed, but easy way is Check in Loop
+  // ค้นหาวิชากิจกรรมจาก Database แทนการ Hardcode
+  const activitySubjects = subjects.filter((s: any) =>
+    s.subject_name?.includes('กิจกรรม') &&
+    s.subject_name?.includes('องค์การ') // เอาเฉพาะกิจกรรมองค์การวิชาชีพ
+  );
+
+  console.log(`📋 Found ${activitySubjects.length} activity subjects for Wednesday slots`);
+
+  if (activitySubjects.length > 0) {
+    // ใส่วิชากิจกรรมที่เจอในคาบ 8-9
+    const activityPeriods = [8, 9];
+
+    for (let i = 0; i < Math.min(activitySubjects.length, 2); i++) {
+      const activitySubj = activitySubjects[i];
+      const period = activityPeriods[i];
+      if (!period) continue;
+
+      const activitySlot = timeslots.find((t: any) => t.period === period);
+      const activityTime = activitySlot ? `${activitySlot.start}-${activitySlot.end}` : `Period ${period}`;
+
+      // หาครูที่สอนวิชากิจกรรมนี้
+      const activityTeachRelation = await db.collection("Teach").findOne({ subject_id: activitySubj.subject_id });
+      const activityTeacher = activityTeachRelation
+        ? teachers.find((t: any) => t.teacher_id === activityTeachRelation.teacher_id || t.id === activityTeachRelation.teacher_id)
+        : null;
+
+      schedule.push({
+        subject: activitySubj.subject_id,
+        subjectName: activitySubj.subject_name,
+        teacher: activityTeacher ? activityTeacher.teacher_name : "ครูประจำกิจกรรม",
+        room: "สนามกีฬา/ห้องกิจกรรม",
+        day: "Wed",
+        period: period,
+        slotNo: period,
+        time: activityTime,
+        type: "Activity"
+      });
+
+      // Block all resources for this activity
+      markBusy("ACTIVITY", "ACTIVITY_AREA", "ALL", "Wed", period);
+    }
+  } else {
+    // Fallback: ถ้าไม่มีวิชากิจกรรมในฐานข้อมูล ใช้ Hardcode เดิม
+    [8, 9].forEach(period => {
+      const activitySlot = timeslots.find((t: any) => t.period === period);
+      const activityTime = activitySlot ? `${activitySlot.start}-${activitySlot.end}` : `Period ${period}`;
+
+      schedule.push({
+        subject: "ACTIVITY",
+        subjectName: period === 8 ? "กิจกรรมลูกเสือ/เนตรนารี" : "กิจกรรมชุมนุม",
+        teacher: "ครูประจำกิจกรรม",
+        room: "สนามกีฬา/ห้องกิจกรรม",
+        day: "Wed",
+        period: period,
+        slotNo: period,
+        time: activityTime,
+        type: "Activity"
+      });
+
+      // Block all resources for this activity
+      markBusy("ACTIVITY", "ACTIVITY_AREA", "ALL", "Wed", period);
+    });
+  }
+
+  // 3.4 📋 ประชุมหัวหน้าแผนก (อังคาร คาบ 8)
+  // Constraint 10: หัวหน้าแผนก (Leader) ประชุม อังคาร 15:00-16:00 (คาบ 8)
+  const meetingSlot = timeslots.find((t: any) => t.period === 8);
+  const meetingTime = meetingSlot ? `${meetingSlot.start}-${meetingSlot.end}` : "Period 8";
+
+  schedule.push({
+    subject: "MEETING",
+    subjectName: "ประชุมหัวหน้าแผนก",
+    teacher: "หัวหน้าแผนกทุกท่าน",
+    room: "ห้องประชุม",
+    day: "Tue",
+    period: 8,
+    slotNo: 8,
+    time: meetingTime,
+    type: "Meeting"
   });
 
-  // 3.3 ประชุม Leader (อังคาร คาบ 8) - Block Leader
-  // Constraint 10: หัวหน้าแผนก (Leader) ประชุม อังคาร 15:00-16:00 (คาบ 8)
-  const leaders = teachers.filter((t: any) => t.role === "Head" || t.role === "Leader" || t.unavailable?.includes("Leader"));
+  // Block leaders for this meeting
+  const leaders = teachers.filter((t: any) => t.role === "Head" || t.role === "Manager" || t.unavailable?.includes("Manager"));
   leaders.forEach((leader: any) => {
-    markBusy(leader.id, "MEETING_ROOM", "ALL", "Tue", 8);
+    markBusy(leader.id || leader.teacher_id, "MEETING_ROOM", "ALL", "Tue", 8);
   });
 
   // 4. แปลง Subject ให้เป็น Task (Lecture / Practice)
@@ -582,24 +769,18 @@ async function generateNewSchedule(prompt: string) {
     if (count > 0) console.log(`   ${roomId}: ${count} times`);
   });
 
-  // 8. Return Schedule with Validation
-  return NextResponse.json({
-    message: "Success (Logic-Based)",
-    ai_analysis: `สร้างตารางตามกฎ 15 ข้อ - ${validation.summary}`,
-    result: schedule,
+  // 8. Return Schedule Data (not NextResponse)
+  return {
+    schedule,
+    validation,
     stats: {
       totalEntries: schedule.length,
       subjects: [...new Set(schedule.map((s: { subject: string }) => s.subject))].length,
       roomsUsed: Array.from(roomUsage.entries())
         .filter(([_, count]) => count > 0)
         .map(([roomId, count]) => ({ roomId, usage: count }))
-    },
-    validation: {
-      passed: validation.passed,
-      violations: validation.violations,
-      warnings: validation.warnings
     }
-  });
+  };
 }
 
 // ============================================
@@ -770,6 +951,14 @@ PARSING STEPS for "ย้ายคาบ 8 วันจันทร์ไปค�
 
   } catch (error: any) {
     console.error("❌ Error:", error);
+
+    // จัดการ Groq API Key errors ให้เข้าใจง่าย
+    if (error.status === 401 || error.message?.includes('API') || error.message?.includes('invalid_api_key')) {
+      return NextResponse.json({
+        error: "❌ API Key ไม่ถูกต้องหรือหมดอายุ กรุณาตรวจสอบ GROQ_API_KEY ในไฟล์ .env"
+      }, { status: 401 });
+    }
+
     return NextResponse.json({
       error: "⚠️ เกิดข้อผิดพลาด: " + error.message
     }, { status: 500 });
@@ -982,6 +1171,21 @@ async function handleScheduleManagement(body: any, aiAdvice?: any) {
         safety: aiAdvice?.safety_check || "✅ ไม่พบความขัดแย้ง"
       },
       result: updatedSchedule
+    });
+  }
+
+  // ============================================
+  // 📋 INFO / ANALYZE — AI ต้องการแจ้งข้อมูล (ไม่แก้ไขตาราง)
+  // ============================================
+  if (action === 'INFO' || action === 'ANALYZE' || action === 'NONE') {
+    return NextResponse.json({
+      message: body.explanation || "📋 ข้อมูลจากระบบ",
+      action: "INFO",
+      ai_insight: {
+        recommendation: aiAdvice?.smart_suggestion || "ไม่มีการเปลี่ยนแปลงตาราง",
+        warnings: aiAdvice?.potential_issues || []
+      },
+      result: currentSchedule // คืนตารางเดิม ไม่เปลี่ยนแปลง
     });
   }
 

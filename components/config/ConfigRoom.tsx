@@ -1,33 +1,30 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, School, Users, X, Monitor, BookOpen, ChevronLeft, Trash2, Pencil } from "lucide-react";
+import { Plus, School, X, Monitor, BookOpen, ChevronLeft, Trash2, Pencil } from "lucide-react";
 
 interface ConfigRoomProps {
   onClose: () => void;
 }
 
 export default function ConfigRoom({ onClose }: ConfigRoomProps) {
+  // ✅ 1. Interface ตรงกับ Prisma Model: Room
   interface Room {
-    id: string;
-    name: string;
-    type: string;
-    capacity: number;
+    room_id: string;
+    room_name: string;
+    room_type: string;
   }
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
-  // ✅ State สำหรับเช็คว่ากำลังแก้ไขอยู่หรือไม่
   const [isEditing, setIsEditing] = useState(false);
 
-  // Form State
+  // ✅ 2. Form Data ตรงกับ API
   const [formData, setFormData] = useState({
-    id: "",
-    name: "",
-    type: "Lecture",
-    capacity: 40,
+    room_id: "",
+    room_name: "",
+    room_type: "Lecture",
   });
 
   useEffect(() => {
@@ -36,9 +33,13 @@ export default function ConfigRoom({ onClose }: ConfigRoomProps) {
 
   const fetchRooms = async () => {
     try {
-      const res = await fetch("/api/config/room");
-      if (res.ok) {
-        const data = await res.json();
+      const res = await fetch("/api/teachers/room"); // ตรวจสอบ path api ให้ถูกนะครับ (น่าจะเป็น /api/rooms หรือที่ตั้งไว้)
+      // สมมติว่า path คือ /api/rooms ตามบริบทก่อนหน้า
+      // ถ้าคุณรวมไว้ใน config/room ให้แก้ path ตรงนี้
+      const resReal = await fetch("/api/config/room"); 
+      
+      if (resReal.ok) {
+        const data = await resReal.json();
         setRooms(data);
       }
     } catch (error) {
@@ -48,31 +49,26 @@ export default function ConfigRoom({ onClose }: ConfigRoomProps) {
     }
   };
 
-  // ✅ ฟังก์ชันเปิด Modal สำหรับการ "เพิ่ม" (Reset Form)
   const handleOpenAdd = () => {
     setIsEditing(false);
-    setFormData({ id: "", name: "", type: "Lecture", capacity: 40 });
+    setFormData({ room_id: "", room_name: "", room_type: "Lecture" });
     setIsModalOpen(true);
   };
 
-  // ✅ ฟังก์ชันเปิด Modal สำหรับการ "แก้ไข" (Load Data)
   const handleOpenEdit = (room: Room) => {
     setIsEditing(true);
     setFormData({
-      id: room.id,
-      name: room.name,
-      type: room.type,
-      capacity: room.capacity,
+      room_id: room.room_id,
+      room_name: room.room_name,
+      room_type: room.room_type,
     });
     setIsModalOpen(true);
   };
 
-  // ✅ ฟังก์ชันลบห้อง
   const handleDelete = async (id: string) => {
     if (!confirm(`คุณต้องการลบห้อง ${id} ใช่หรือไม่?`)) return;
 
     try {
-      // ส่ง id ไปทาง Query Params (หรือจะเปลี่ยนเป็น Body ก็ได้ตาม API ของคุณ)
       const res = await fetch(`/api/config/room?id=${id}`, {
         method: "DELETE",
       });
@@ -84,7 +80,7 @@ export default function ConfigRoom({ onClose }: ConfigRoomProps) {
       }
 
       alert("ลบห้องเรียบร้อย!");
-      fetchRooms(); // โหลดข้อมูลใหม่
+      fetchRooms();
     } catch (error) {
       alert("เกิดข้อผิดพลาดในการลบ");
     }
@@ -93,7 +89,6 @@ export default function ConfigRoom({ onClose }: ConfigRoomProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      // ✅ เช็ค method ว่าจะเป็น POST (เพิ่ม) หรือ PUT (แก้ไข)
       const method = isEditing ? "PUT" : "POST";
       
       const res = await fetch("/api/config/room", {
@@ -142,7 +137,7 @@ export default function ConfigRoom({ onClose }: ConfigRoomProps) {
           
           <div className="flex gap-3">
              <button
-                onClick={handleOpenAdd} // ✅ ใช้ handleOpenAdd แทน
+                onClick={handleOpenAdd}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 shadow-md transition-all active:scale-95"
              >
             <Plus className="w-5 h-5" />
@@ -166,60 +161,37 @@ export default function ConfigRoom({ onClose }: ConfigRoomProps) {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 pb-20">
             {rooms.map((room) => (
               <div
-                key={room.id}
+                key={room.room_id}
                 className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-lg transition-all relative overflow-hidden group"
               >
-                {/* Decoration */}
                 <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-50 rounded-bl-full -mr-8 -mt-8 transition-all group-hover:bg-indigo-100"></div>
                 
-                {/* Header Card */}
                 <div className="flex justify-between items-start mb-4 relative z-10">
                   <div className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded uppercase tracking-wider">
-                    {room.id}
+                    {room.room_id}
                   </div>
-                  {getIcon(room.type)}
+                  {getIcon(room.room_type)}
                 </div>
 
-                {/* Content */}
-                <h3 className="text-lg font-bold text-gray-800 mb-1">{room.name}</h3>
-                <p className="text-sm text-gray-500 mb-4">{room.type} Room</p>
+                <h3 className="text-lg font-bold text-gray-800 mb-1">{room.room_name}</h3>
+                <p className="text-sm text-gray-500 mb-4">{room.room_type} Room</p>
 
-                <div className="flex items-center justify-between mt-auto">
-                    <div className="flex items-center gap-2 text-gray-600 text-sm bg-gray-50 p-2 rounded-lg border border-gray-100">
-                        <Users className="w-4 h-4 text-indigo-400" />
-                        <span className="font-semibold text-gray-900">{room.capacity}</span>
-                    </div>
-
-                    {/* ✅ Action Buttons (Edit & Delete) */}
-                    <div className="flex gap-2">
-                        <button 
-                            onClick={() => handleOpenEdit(room)}
-                            className="p-2 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-colors"
-                            title="แก้ไข"
-                        >
-                            <Pencil className="w-4 h-4" />
-                        </button>
-                        <button 
-                            onClick={() => handleDelete(room.id)}
-                            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                            title="ลบ"
-                        >
-                            <Trash2 className="w-4 h-4" />
-                        </button>
-                    </div>
+                <div className="flex items-center justify-end mt-auto gap-2">
+                    <button 
+                        onClick={() => handleOpenEdit(room)}
+                        className="p-2 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-colors"
+                    >
+                        <Pencil className="w-4 h-4" />
+                    </button>
+                    <button 
+                        onClick={() => handleDelete(room.room_id)}
+                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                    </button>
                 </div>
               </div>
             ))}
-            
-            {!loading && rooms.length === 0 && (
-                <div className="col-span-full flex flex-col items-center justify-center py-12 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50">
-                    <School className="w-12 h-12 mb-3 opacity-20" />
-                    <p>ยังไม่มีข้อมูลห้องเรียน</p>
-                    <button onClick={handleOpenAdd} className="text-indigo-500 hover:underline mt-2 text-sm">
-                        + เพิ่มห้องแรกเลย
-                    </button>
-                </div>
-            )}
           </div>
         )}
 
@@ -228,7 +200,6 @@ export default function ConfigRoom({ onClose }: ConfigRoomProps) {
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-60 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl scale-100 animate-in zoom-in-95 duration-200 border border-gray-100">
               <div className="flex justify-between items-center mb-6 border-b pb-4">
-                {/* ✅ เปลี่ยน Title ตามสถานะ */}
                 <h2 className="text-xl font-bold text-gray-800">
                     {isEditing ? "แก้ไขข้อมูลห้องเรียน" : "เพิ่มห้องเรียนใหม่"}
                 </h2>
@@ -243,14 +214,13 @@ export default function ConfigRoom({ onClose }: ConfigRoomProps) {
                   <input
                     required
                     type="text"
-                    // ✅ ถ้าแก้ไข ห้ามแก้ ID (ReadOnly)
                     readOnly={isEditing}
                     placeholder="เช่น R001, 101"
                     className={`w-full border rounded-lg p-2.5 outline-none transition-shadow ${
                         isEditing ? "bg-gray-100 text-gray-500 cursor-not-allowed" : "focus:ring-2 focus:ring-indigo-500"
                     }`}
-                    value={formData.id}
-                    onChange={(e) => setFormData({ ...formData, id: e.target.value })}
+                    value={formData.room_id}
+                    onChange={(e) => setFormData({ ...formData, room_id: e.target.value })}
                   />
                 </div>
 
@@ -259,38 +229,25 @@ export default function ConfigRoom({ onClose }: ConfigRoomProps) {
                   <input
                     required
                     type="text"
-                    placeholder="เช่น ห้องบรรยาย 1, Lab Com 2"
+                    placeholder="เช่น ห้องบรรยาย 1"
                     className="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    value={formData.room_name}
+                    onChange={(e) => setFormData({ ...formData, room_name: e.target.value })}
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
+                <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">ประเภท</label>
                     <select
                       className="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none bg-white transition-shadow"
-                      value={formData.type}
-                      onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                      value={formData.room_type}
+                      onChange={(e) => setFormData({ ...formData, room_type: e.target.value })}
                     >
                       <option value="Lecture">Lecture</option>
                       <option value="Lab">Lab</option>
                       <option value="Computer">Computer</option>
                       <option value="Auditorium">Auditorium</option>
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">ความจุ (คน)</label>
-                    <input
-                      required
-                      type="number"
-                      min="1"
-                      className="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
-                      value={formData.capacity}
-                      onChange={(e) => setFormData({ ...formData, capacity: Number(e.target.value) })}
-                    />
-                  </div>
                 </div>
 
                 <button

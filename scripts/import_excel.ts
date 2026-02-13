@@ -3,20 +3,20 @@ import path from 'path';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { createRequire } from 'module'; // 1. นำเข้า createRequire
+import { createRequire } from 'module';
 
-// 2. สร้างตัวแปร require, __filename, __dirname ขึ้นมาเอง
+// สร้างตัวแปร require, __filename, __dirname ขึ้นมาเอง
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 3. โหลด xlsx ด้วย require (แก้ปัญหา .readFile is not a function)
+// โหลด xlsx ด้วย require
 const xlsx = require('xlsx');
 
 dotenv.config();
 
 const uri = process.env.DATABASE_URL;
-const dbName = "autotable"; 
+const dbName = "autotable";
 
 if (!uri) {
   console.error("❌ ไม่พบ DATABASE_URL ในไฟล์ .env");
@@ -25,12 +25,16 @@ if (!uri) {
 
 const client = new MongoClient(uri);
 
-// ฟังก์ชันช่วยอ่าน Sheet แรกของไฟล์
+// ฟังก์ชันช่วยอ่าน Sheet แรกของไฟล์ (รองรับทั้ง Excel และ CSV)
 const readFirstSheet = (filePath: string): any[] => {
-  // ตอนนี้ xlsx เป็น object ที่ถูกต้องแล้ว เรียก readFile ได้แน่นอน
+  // xlsx.readFile อ่านได้ทั้ง .xlsx และ .csv โดยอัตโนมัติ
   const workbook = xlsx.readFile(filePath);
-  const sheetName = workbook.SheetNames[0]; 
+
+  // ถ้าเป็น CSV มันจะมี Sheet เดียวชื่อ "Sheet1"
+  const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
+
+  // แปลงเป็น JSON
   return xlsx.utils.sheet_to_json(sheet);
 };
 
@@ -104,37 +108,34 @@ async function importTeachers(db: any, filePath: string) {
 }
 
 // ==========================================
-// 4. Timeslot
+// 4. Timeslot (Helper Function)
 // ==========================================
-// ฟังก์ชันช่วยแปลง String เวลา (08:00:00) ให้เป็น Date Object
-const parseTime = (timeStr: any): Date | null => {
-  if (!timeStr) return null;
-  
-  // กรณี Excel ส่งมาเป็นตัวเลขทศนิยม (เช่น 0.333 สำหรับ 8 โมง)
+const formatTimeSimple = (timeStr: any): string | null => {
+  if (timeStr === undefined || timeStr === null) return null;
+
+  // กรณี Excel ส่งมาเป็นตัวเลข (Serial Number) e.g. 0.333333
   if (typeof timeStr === 'number') {
-    const totalSeconds = Math.floor(timeStr * 86400);
+    const totalSeconds = Math.round(timeStr * 86400); // 24 * 60 * 60
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const date = new Date();
-    date.setUTCHours(hours, minutes, 0, 0); // ใช้ UTC เพื่อความเป็นกลาง
-    date.setUTCFullYear(1970, 0, 1);       // ล็อควันที่ไว้ที่ 1 ม.ค. 1970
-    return date;
+    // Format HH:mm
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   }
 
-  // กรณีเป็น String "08:00:00"
-  const parts = String(timeStr).split(':');
+  // กรณีเป็น String "08:00:00" หรือ "8:00"
+  const str = String(timeStr).trim();
+  const parts = str.split(':');
   if (parts.length >= 2) {
-    const date = new Date();
-    date.setUTCHours(parseInt(parts[0]), parseInt(parts[1]), 0, 0);
-    date.setUTCFullYear(1970, 0, 1); // ล็อควันที่ไว้
-    return date;
+    let h = parseInt(parts[0]);
+    let m = parseInt(parts[1]);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
-  
-  return null;
+
+  return str; // Return as is if format unknown
 };
 
 // ==========================================
-// 4. จัดการ Timeslot (Updated for DateTime)
+// 4. Timeslot (Import)
 // ==========================================
 async function importTimeslots(db: any, filePath: string) {
   console.log(`📖 Processing Timeslot: ${path.basename(filePath)}`);
@@ -142,9 +143,9 @@ async function importTimeslots(db: any, filePath: string) {
   if (!data.length) return;
 
   const ops = data.map((row: any) => {
-    // แปลงเวลาตรงนี้
-    const startTime = parseTime(row.start);
-    const endTime = parseTime(row.end);
+    // ใช้ string "08:00" ตรงๆ ไม่ต้องแปลงเป็น Timezone
+    const startTime = formatTimeSimple(row.start);
+    const endTime = formatTimeSimple(row.end);
 
     return {
       replaceOne: {
@@ -153,8 +154,8 @@ async function importTimeslots(db: any, filePath: string) {
           timeslot_id: String(row.timeslot_id),
           day: row.day,
           period: parseInt(row.period || '0'),
-          start: startTime, // ส่งค่าเป็น Date Object
-          end: endTime      // ส่งค่าเป็น Date Object
+          start: startTime, // Save as String "HH:mm"
+          end: endTime      // Save as String "HH:mm"
         },
         upsert: true
       }
@@ -172,10 +173,9 @@ async function importRooms(db: any, filePath: string) {
   console.log(`📖 Processing Room: ${path.basename(filePath)}`);
   const data = readFirstSheet(filePath);
   if (!data.length) return;
-  
-  // กรอง room_id ที่ว่างทิ้ง
+
   const validData = data.filter((row: any) => row.room_id && String(row.room_id).trim() !== '');
-  
+
   const ops = validData.map((row: any) => ({
     replaceOne: {
       filter: { room_id: String(row.room_id) },
@@ -200,9 +200,9 @@ async function importTeachRelations(db: any, filePath: string) {
   if (!data.length) return;
   const ops = data.map((row: any) => ({
     replaceOne: {
-      filter: { 
-        teacher_id: String(row.teacher_id), 
-        subject_id: String(row.subject_id) 
+      filter: {
+        teacher_id: String(row.teacher_id),
+        subject_id: String(row.subject_id)
       },
       replacement: {
         teacher_id: String(row.teacher_id),
@@ -224,9 +224,9 @@ async function importRegisters(db: any, filePath: string) {
   if (!data.length) return;
   const ops = data.map((row: any) => ({
     replaceOne: {
-      filter: { 
-        group_id: String(row.group_id), 
-        subject_id: String(row.subject_id) 
+      filter: {
+        group_id: String(row.group_id),
+        subject_id: String(row.subject_id)
       },
       replacement: {
         group_id: String(row.group_id),
@@ -248,18 +248,20 @@ async function run() {
     console.log("🔌 Connected to MongoDB");
     const db = client.db(dbName);
 
-    // ใช้ __dirname ที่เราสร้างเองด้านบน
-    const dataDir = path.join(__dirname, '../data'); 
-    
+    const dataDir = path.join(__dirname, '../data');
+
     if (!fs.existsSync(dataDir)) throw new Error(`ไม่พบโฟลเดอร์: ${dataDir}`);
 
-    const files = fs.readdirSync(dataDir).filter(f => f.endsWith('.xlsx'));
-    console.log(`📂 Found ${files.length} Excel files in ${dataDir}`);
+    // ⚡️ แก้ไขตรงนี้: หาไฟล์ทั้ง .xlsx และ .csv
+    const files = fs.readdirSync(dataDir).filter(f => f.endsWith('.xlsx') || f.endsWith('.csv'));
+
+    console.log(`📂 Found ${files.length} files (Excel/CSV) in ${dataDir}`);
 
     for (const file of files) {
       const filePath = path.join(dataDir, file);
       const lowerName = file.toLowerCase();
 
+      // Logic เดิม ยังใช้ได้เพราะเช็คชื่อไฟล์
       if (lowerName.includes('student_group')) await importStudentGroups(db, filePath);
       else if (lowerName.includes('subject')) await importSubjects(db, filePath);
       else if (lowerName.includes('teacher')) await importTeachers(db, filePath);

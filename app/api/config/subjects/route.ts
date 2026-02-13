@@ -2,82 +2,87 @@ import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 
 // ---------------------------------------------------------
-// 🟢 GET: ดึงข้อมูลอาจารย์ทั้งหมด
+// 🟢 GET: ดึงข้อมูลวิชาทั้งหมด
 // ---------------------------------------------------------
 export async function GET() {
   try {
     const client = await clientPromise;
     const db = client.db("autotable");
-    const teachers = await db.collection("Teacher").find({}).toArray();
+    const subjects = await db.collection("Subject").find({}).toArray();
 
-    // Map _id กลับเป็น teacher_id ให้ตรงกับ Model
-    const formattedTeachers = teachers.map(t => ({
-      teacher_id: t._id,
-      teacher_name: t.teacher_name,
-      role: t.role
+    const formattedSubjects = subjects.map(s => ({
+      subject_id: s._id, // map _id กลับเป็น subject_id
+      subject_name: s.subject_name,
+      theory: s.theory,
+      practice: s.practice,
+      credit: s.credit
     }));
 
-    return NextResponse.json(formattedTeachers);
+    return NextResponse.json(formattedSubjects);
   } catch (error) {
     return NextResponse.json({ error: "ดึงข้อมูลไม่สำเร็จ" }, { status: 500 });
   }
 }
 
 // ---------------------------------------------------------
-// 🔵 POST: เพิ่มอาจารย์ใหม่
+// 🔵 POST: เพิ่มวิชาใหม่
 // ---------------------------------------------------------
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { teacher_id, teacher_name, role } = body;
+    const { subject_id, subject_name, theory, practice, credit } = body;
 
-    if (!teacher_id || !teacher_name || !role) {
+    // ตรวจสอบว่ามีข้อมูลครบไหม (ค่า 0 ถือว่ามีข้อมูล ดังนั้นเช็ค undefined/null)
+    if (!subject_id || !subject_name || theory === undefined || practice === undefined || credit === undefined) {
       return NextResponse.json({ error: "กรุณากรอกข้อมูลให้ครบ" }, { status: 400 });
     }
 
     const client = await clientPromise;
     const db = client.db("autotable");
 
-    // เช็ค ID ซ้ำ
-    const existing = await db.collection("Teacher").findOne({ _id: teacher_id });
+    const existing = await db.collection("Subject").findOne({ _id: subject_id });
     if (existing) {
-      return NextResponse.json({ error: `รหัสอาจารย์นี้ (${teacher_id}) มีอยู่แล้ว` }, { status: 400 });
+      return NextResponse.json({ error: `รหัสวิชานี้ (${subject_id}) มีอยู่แล้ว` }, { status: 400 });
     }
 
-    // บันทึก (map teacher_id -> _id)
-    await db.collection("Teacher").insertOne({
-      _id: teacher_id,
-      teacher_name,
-      role
+    // บันทึก (ต้องแปลงเป็น Number เพื่อให้ตรงกับ Int ใน Schema)
+    await db.collection("Subject").insertOne({
+      _id: subject_id,
+      subject_name,
+      theory: Number(theory),
+      practice: Number(practice),
+      credit: Number(credit)
     });
 
-    return NextResponse.json({ message: "เพิ่มอาจารย์สำเร็จ" });
+    return NextResponse.json({ message: "เพิ่มวิชาสำเร็จ" });
   } catch (error) {
     return NextResponse.json({ error: "เกิดข้อผิดพลาดในการบันทึก" }, { status: 500 });
   }
 }
 
 // ---------------------------------------------------------
-// 🟡 PUT: แก้ไขข้อมูลอาจารย์
+// 🟡 PUT: แก้ไขวิชา
 // ---------------------------------------------------------
 export async function PUT(req: Request) {
   try {
     const body = await req.json();
-    const { teacher_id, teacher_name, role } = body;
+    const { subject_id, subject_name, theory, practice, credit } = body;
 
-    if (!teacher_id) {
-      return NextResponse.json({ error: "ไม่พบรหัสอาจารย์ (teacher_id)" }, { status: 400 });
+    if (!subject_id) {
+      return NextResponse.json({ error: "ไม่พบรหัสวิชา (subject_id)" }, { status: 400 });
     }
 
     const client = await clientPromise;
     const db = client.db("autotable");
 
-    const result = await db.collection("Teacher").updateOne(
-      { _id: teacher_id },
+    const result = await db.collection("Subject").updateOne(
+      { _id: subject_id },
       {
         $set: {
-          teacher_name,
-          role
+          subject_name,
+          theory: Number(theory),
+          practice: Number(practice),
+          credit: Number(credit)
         }
       }
     );
@@ -93,12 +98,12 @@ export async function PUT(req: Request) {
 }
 
 // ---------------------------------------------------------
-// 🔴 DELETE: ลบอาจารย์
+// 🔴 DELETE: ลบวิชา
 // ---------------------------------------------------------
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id"); // รับ teacher_id
+    const id = searchParams.get("id"); // รับ subject_id
 
     if (!id) {
       return NextResponse.json({ error: "กรุณาระบุ ID ที่ต้องการลบ" }, { status: 400 });
@@ -107,7 +112,7 @@ export async function DELETE(req: Request) {
     const client = await clientPromise;
     const db = client.db("autotable");
 
-    const result = await db.collection<any>("Teacher").deleteOne({ _id: id });
+    const result = await db.collection<any>("Subject").deleteOne({ _id: id });
 
     if (result.deletedCount === 0) {
       return NextResponse.json({ error: "ไม่พบข้อมูล หรือลบไม่สำเร็จ" }, { status: 404 });

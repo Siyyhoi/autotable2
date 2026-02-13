@@ -1,23 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, BookOpen, Layers, X, ChevronLeft, Trash2, Pencil, Clock, Monitor } from "lucide-react";
+import { Plus, BookOpen, X, ChevronLeft, Trash2, Pencil, Clock } from "lucide-react";
 
 interface ConfigSubjectProps {
   onClose: () => void;
 }
 
 export default function ConfigSubject({ onClose }: ConfigSubjectProps) {
-  // ✅ 1. อัปเดต Interface ให้ตรงกับ Schema
+  // ✅ 1. Interface ตรงกับ Prisma Model: Subject
   interface Subject {
-    id: string;
-    nameTH: string;
-    nameEN: string;
-    lectureHours: number;
-    labHours: number;
-    totalHours: number;
-    recommendedYear: number;
-    reqComputer: boolean;
+    subject_id: string;
+    subject_name: string;
+    theory: number;
+    practice: number;
+    credit: number;
   }
 
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -25,15 +22,13 @@ export default function ConfigSubject({ onClose }: ConfigSubjectProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
-  // ✅ 2. อัปเดต Form State
+  // ✅ 2. Form Data
   const [formData, setFormData] = useState({
-    id: "",
-    nameTH: "",
-    nameEN: "",
-    lectureHours: 1,
-    labHours: 2,
-    recommendedYear: 1,
-    reqComputer: false,
+    subject_id: "",
+    subject_name: "",
+    theory: 1,
+    practice: 2,
+    credit: 3,
   });
 
   useEffect(() => {
@@ -56,20 +51,18 @@ export default function ConfigSubject({ onClose }: ConfigSubjectProps) {
 
   const handleOpenAdd = () => {
     setIsEditing(false);
-    setFormData({ id: "", nameTH: "", nameEN: "", lectureHours: 1, labHours: 2, recommendedYear: 1, reqComputer: false });
+    setFormData({ subject_id: "", subject_name: "", theory: 1, practice: 2, credit: 3 });
     setIsModalOpen(true);
   };
 
   const handleOpenEdit = (sub: Subject) => {
     setIsEditing(true);
     setFormData({
-      id: sub.id,
-      nameTH: sub.nameTH,
-      nameEN: sub.nameEN || "",
-      lectureHours: sub.lectureHours,
-      labHours: sub.labHours,
-      recommendedYear: sub.recommendedYear,
-      reqComputer: sub.reqComputer,
+      subject_id: sub.subject_id,
+      subject_name: sub.subject_name,
+      theory: sub.theory,
+      practice: sub.practice,
+      credit: sub.credit,
     });
     setIsModalOpen(true);
   };
@@ -141,38 +134,30 @@ export default function ConfigSubject({ onClose }: ConfigSubjectProps) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
             {subjects.map((sub) => (
-              <div key={sub.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-lg transition-all relative overflow-hidden group">
-                {/* Decoration */}
+              <div key={sub.subject_id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-lg transition-all relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-50 rounded-bl-full -mr-10 -mt-10 group-hover:bg-indigo-100 transition-colors"></div>
                 
                 <div className="flex justify-between items-start mb-3 relative z-10">
                   <div className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded text-xs font-bold uppercase">
-                    ชั้นปี {sub.recommendedYear}
-                  </div>
-                  {sub.reqComputer && (
-                    <span title="ต้องการคอมพิวเตอร์">
-                      <Monitor className="w-4 h-4 text-blue-500" />
-                    </span>
-                  )}                
-                  </div>
+                    {sub.credit} หน่วยกิต
+                  </div>            
+                </div>
                 <div className="mb-4">
-                    <h3 className="text-lg font-bold text-gray-800 line-clamp-1">{sub.nameTH}</h3>
-                    <p className="text-xs text-gray-400 line-clamp-1">{sub.nameEN}</p>
-                    <p className="text-sm text-indigo-500 font-medium mt-1">{sub.id}</p>
+                    <h3 className="text-lg font-bold text-gray-800 line-clamp-1">{sub.subject_name}</h3>
+                    <p className="text-sm text-indigo-500 font-medium mt-1">{sub.subject_id}</p>
                 </div>
 
                 <div className="flex items-center justify-between mt-auto border-t pt-3 border-gray-100">
                     <div className="flex items-center gap-1.5 text-gray-600 text-xs">
                         <Clock className="w-3.5 h-3.5" />
-                        <span>{sub.lectureHours}ท. / {sub.labHours}ป.</span>
-                        <span className="bg-gray-100 px-1 rounded text-[10px] font-bold">รวม {sub.totalHours}</span>
+                        <span>ทฤษฎี {sub.theory} / ปฏิบัติ {sub.practice}</span>
                     </div>
 
                     <div className="flex gap-1">
                         <button onClick={() => handleOpenEdit(sub)} className="p-1.5 text-gray-400 hover:text-amber-500 bg-gray-50 rounded-md">
                             <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => handleDelete(sub.id)} className="p-1.5 text-gray-400 hover:text-red-500 bg-gray-50 rounded-md">
+                        <button onClick={() => handleDelete(sub.subject_id)} className="p-1.5 text-gray-400 hover:text-red-500 bg-gray-50 rounded-md">
                             <Trash2 className="w-3.5 h-3.5" />
                         </button>
                     </div>
@@ -192,56 +177,36 @@ export default function ConfigSubject({ onClose }: ConfigSubjectProps) {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">รหัสวิชา</label>
-                        <input required type="text" readOnly={isEditing} 
-                            className={`w-full border rounded-lg p-2 ${isEditing ? 'bg-gray-100' : ''}`}
-                            value={formData.id} onChange={(e) => setFormData({ ...formData, id: e.target.value })} 
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">ชั้นปีที่แนะนำ</label>
-                        <input type="number" min="1" max="6"
-                            className="w-full border rounded-lg p-2"
-                            value={formData.recommendedYear} onChange={(e) => setFormData({ ...formData, recommendedYear: Number(e.target.value) })}
-                        />
-                    </div>
-                </div>
-
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อวิชา (ไทย)</label>
-                  <input required type="text" className="w-full border rounded-lg p-2"
-                    value={formData.nameTH} onChange={(e) => setFormData({ ...formData, nameTH: e.target.value })} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อวิชา (อังกฤษ)</label>
-                  <input type="text" className="w-full border rounded-lg p-2"
-                    value={formData.nameEN} onChange={(e) => setFormData({ ...formData, nameEN: e.target.value })} />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1">ชั่วโมงบรรยาย (ทฤษฎี)</label>
-                    <input required type="number" min="0" className="w-full border rounded-lg p-2 text-center"
-                      value={formData.lectureHours} onChange={(e) => setFormData({ ...formData, lectureHours: Number(e.target.value) })} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1">ชั่วโมงปฏิบัติ (แล็บ)</label>
-                    <input required type="number" min="0" className="w-full border rounded-lg p-2 text-center"
-                      value={formData.labHours} onChange={(e) => setFormData({ ...formData, labHours: Number(e.target.value) })} />
-                  </div>
-                  <div className="col-span-2 text-center text-sm text-indigo-600 font-semibold">
-                    รวมเวลาเรียน: {Number(formData.lectureHours) + Number(formData.labHours)} คาบ
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 pt-2">
-                    <input type="checkbox" id="reqComp" className="w-4 h-4"
-                        checked={formData.reqComputer} 
-                        onChange={(e) => setFormData({ ...formData, reqComputer: e.target.checked })} 
+                    <label className="block text-sm font-medium text-gray-700 mb-1">รหัสวิชา</label>
+                    <input required type="text" readOnly={isEditing} 
+                        className={`w-full border rounded-lg p-2 ${isEditing ? 'bg-gray-100' : ''}`}
+                        value={formData.subject_id} onChange={(e) => setFormData({ ...formData, subject_id: e.target.value })} 
                     />
-                    <label htmlFor="reqComp" className="text-sm text-gray-700 cursor-pointer">วิชานี้ต้องใช้ห้องคอมพิวเตอร์</label>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อวิชา</label>
+                  <input required type="text" className="w-full border rounded-lg p-2"
+                    value={formData.subject_name} onChange={(e) => setFormData({ ...formData, subject_name: e.target.value })} />
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">หน่วยกิต</label>
+                    <input required type="number" min="0" className="w-full border rounded-lg p-2 text-center"
+                      value={formData.credit} onChange={(e) => setFormData({ ...formData, credit: Number(e.target.value) })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">ทฤษฎี (ชม.)</label>
+                    <input required type="number" min="0" className="w-full border rounded-lg p-2 text-center"
+                      value={formData.theory} onChange={(e) => setFormData({ ...formData, theory: Number(e.target.value) })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">ปฏิบัติ (ชม.)</label>
+                    <input required type="number" min="0" className="w-full border rounded-lg p-2 text-center"
+                      value={formData.practice} onChange={(e) => setFormData({ ...formData, practice: Number(e.target.value) })} />
+                  </div>
                 </div>
 
                 <button type="submit" className={`w-full mt-4 py-3 rounded-xl font-bold shadow-lg text-white ${isEditing ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
