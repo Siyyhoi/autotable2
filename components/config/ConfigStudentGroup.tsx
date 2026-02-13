@@ -1,290 +1,171 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Users, X, UserCheck, GraduationCap, ChevronLeft, Trash2, Pencil } from "lucide-react";
+import { Plus, GraduationCap, X, ChevronLeft, Trash2, Pencil, Search, Users, Save } from "lucide-react";
 
-interface ConfigStudentGroupProps {
-  onClose: () => void;
+interface ConfigStudentGroupProps { onClose: () => void; }
+
+interface StudentGroup {
+  group_id: string;
+  group_name: string;
+  advisor: string;
+  group_count: number;
 }
 
 export default function ConfigStudentGroup({ onClose }: ConfigStudentGroupProps) {
-  // ✅ 1. Interface ตรงกับ Prisma Model: StudentGroup
-  interface StudentGroup {
-    group_id: string;
-    group_name: string;
-    group_count: number;
-    advisor: string;
-  }
-
   const [groups, setGroups] = useState<StudentGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState({ group_id: "", group_name: "", advisor: "", group_count: 30 });
 
-  // ✅ 2. Form Data ตรงกับ API 
-  const [formData, setFormData] = useState({
-    group_id: "",
-    group_name: "",
-    group_count: 0,
-    advisor: "",
-  });
-
-  useEffect(() => {
-    fetchGroups();
-  }, []);
+  useEffect(() => { fetchGroups(); }, []);
 
   const fetchGroups = async () => {
+    setLoading(true);
     try {
-      const res = await fetch("/api/config/studentgroup"); // ตรวจสอบ Path ให้ตรงกับที่สร้างไว้
-      if (res.ok) {
-        const data = await res.json();
-        setGroups(data);
-      }
-    } catch (error) {
-      console.error("Error fetching student groups:", error);
-    } finally {
-      setLoading(false);
-    }
+      const res = await fetch("/api/config/studentgroup");
+      if (res.ok) setGroups(await res.json());
+    } finally { setLoading(false); }
   };
+
+  const filtered = groups.filter(g => 
+    g.group_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    g.group_id.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const handleOpenAdd = () => {
     setIsEditing(false);
-    setFormData({ group_id: "", group_name: "", group_count: 0, advisor: "" });
+    setFormData({ group_id: "", group_name: "", advisor: "", group_count: 30 });
     setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (group: StudentGroup) => {
+  const handleOpenEdit = (g: StudentGroup) => {
     setIsEditing(true);
-    setFormData({
-      group_id: group.group_id,
-      group_name: group.group_name,
-      group_count: group.group_count,
-      advisor: group.advisor,
-    });
+    setFormData(g);
     setIsModalOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(`คุณต้องการลบกลุ่มเรียน ${id} ใช่หรือไม่?`)) return;
-
-    try {
-      const res = await fetch(`/api/config/studentgroup?id=${id}`, {
-        method: "DELETE",
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        alert(err.error || "ลบไม่สำเร็จ");
-        return;
-      }
-
-      alert("ลบกลุ่มเรียนเรียบร้อย!");
-      fetchGroups();
-    } catch (error) {
-      alert("เกิดข้อผิดพลาดในการลบ");
-    }
+    if (!confirm(`ยืนยันลบกลุ่มเรียน ${id}?`)) return;
+    await fetch(`/api/config/student-group?id=${id}`, { method: "DELETE" });
+    fetchGroups();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      const method = isEditing ? "PUT" : "POST";
-      
-      const res = await fetch("/api/config/studentgroup", {
-        method: method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        alert(err.error);
-        return;
-      }
-
-      alert(isEditing ? "แก้ไขข้อมูลเรียบร้อย!" : "เพิ่มกลุ่มเรียนเรียบร้อย!");
-      setIsModalOpen(false);
-      fetchGroups();
-    } catch (error) {
-      alert("เกิดข้อผิดพลาด");
-    }
+    const res = await fetch("/api/config/student-group", {
+      method: isEditing ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formData),
+    });
+    if (!res.ok) return alert("เกิดข้อผิดพลาด");
+    setIsModalOpen(false);
+    fetchGroups();
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-50 z-40 overflow-y-auto animate-in slide-in-from-bottom-10 fade-in duration-300">
-      <div className="p-6 max-w-7xl mx-auto min-h-screen">
-        
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8 sticky top-0 bg-gray-50/95 backdrop-blur py-4 z-10 border-b border-gray-200">
-          <div>
-            <button 
-                onClick={onClose} 
-                className="flex items-center gap-1 text-gray-500 hover:text-indigo-600 mb-1 transition-colors"
-            >
-                <ChevronLeft className="w-5 h-5" /> ย้อนกลับ
-            </button>
-            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-              <Users className="w-8 h-8 text-indigo-600" />
-              จัดการกลุ่มเรียน (Student Groups)
-            </h1>
-          </div>
-          
-          <div className="flex gap-3">
-             <button
-                onClick={handleOpenAdd}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 shadow-md transition-all active:scale-95"
-             >
-            <Plus className="w-5 h-5" />
-            เพิ่มกลุ่มเรียน
-            </button>
-            <button 
-                onClick={onClose}
-                className="p-2 bg-white hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-full border shadow-sm transition-all"
-            >
-                <X className="w-6 h-6" />
-            </button>
-          </div>
-        </div>
-
-        {/* Grid Layout */}
-        {loading ? (
-          <div className="flex items-center justify-center h-64 text-gray-400">
-             <div className="animate-spin mr-2">⏳</div> กำลังโหลดข้อมูล...
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
-            {groups.map((group) => (
-              <div
-                key={group.group_id}
-                className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-lg transition-all relative overflow-hidden group"
-              >
-                <div className="absolute top-0 right-0 w-16 h-16 bg-indigo-50 rounded-bl-full -mr-8 -mt-8 transition-all group-hover:bg-indigo-100"></div>
-                
-                <div className="flex justify-between items-start mb-4 relative z-10">
-                  <div className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-1 rounded tracking-wider">
-                    {group.group_id}
-                  </div>
-                  <GraduationCap className="w-5 h-5 text-indigo-500" />
-                </div>
-
-                <h3 className="text-lg font-bold text-gray-800 mb-1 leading-tight">{group.group_name}</h3>
-                
-                <div className="space-y-2 mt-4">
-                    <div className="flex items-center text-sm text-gray-600 gap-2">
-                        <UserCheck className="w-4 h-4 text-gray-400" />
-                        <span className="font-medium">ที่ปรึกษา:</span> {group.advisor}
-                    </div>
-                    <div className="flex items-center text-sm text-gray-600 gap-2">
-                        <Users className="w-4 h-4 text-gray-400" />
-                        <span className="font-medium">จำนวนนักเรียน:</span> {group.group_count} คน
-                    </div>
-                </div>
-
-                <div className="flex items-center justify-end mt-6 gap-2 border-t pt-4">
-                    <button 
-                        onClick={() => handleOpenEdit(group)}
-                        className="p-2 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded-lg transition-colors"
-                    >
-                        <Pencil className="w-4 h-4" />
-                    </button>
-                    <button 
-                        onClick={() => handleDelete(group.group_id)}
-                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                        <Trash2 className="w-4 h-4" />
-                    </button>
-                </div>
+    <div className="fixed inset-0 bg-slate-100/80 backdrop-blur-sm z-50 overflow-y-auto animate-in fade-in duration-200">
+      <div className="min-h-screen p-4 md:p-8">
+        <div className="max-w-7xl mx-auto bg-white min-h-[90vh] rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+          {/* Header */}
+          <div className="p-6 border-b border-slate-100 bg-white sticky top-0 z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600">
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                  <GraduationCap className="w-7 h-7 text-emerald-600" /> จัดการกลุ่มเรียน
+                </h1>
+                <p className="text-slate-500 text-sm">จำนวน {groups.length} กลุ่ม</p>
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* Modal Form */}
-        {isModalOpen && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl scale-100 animate-in zoom-in-95 duration-200 border border-gray-100">
-              <div className="flex justify-between items-center mb-6 border-b pb-4">
-                <h2 className="text-xl font-bold text-gray-800">
-                    {isEditing ? "แก้ไขข้อมูลกลุ่มเรียน" : "เพิ่มกลุ่มเรียนใหม่"}
-                </h2>
-                <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
-                  <X className="w-6 h-6" />
-                </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="relative group">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input type="text" placeholder="ค้นหากลุ่มเรียน..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-100 w-64" />
               </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">รหัสกลุ่มเรียน (ID)</label>
-                  <input
-                    required
-                    type="text"
-                    readOnly={isEditing}
-                    placeholder="เช่น 663090101"
-                    className={`w-full border rounded-lg p-2.5 outline-none transition-shadow ${
-                        isEditing ? "bg-gray-100 text-gray-500 cursor-not-allowed" : "focus:ring-2 focus:ring-indigo-500"
-                    }`}
-                    value={formData.group_id}
-                    onChange={(e) => setFormData({ ...formData, group_id: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อกลุ่มเรียน</label>
-                  <input
-                    required
-                    type="text"
-                    placeholder="เช่น ปวส.1 เทคโนโลยีสารสนเทศ 1"
-                    className="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
-                    value={formData.group_name}
-                    onChange={(e) => setFormData({ ...formData, group_name: e.target.value })}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนนักเรียน</label>
-                        <input
-                            required
-                            type="number"
-                            min="0"
-                            className="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
-                            value={formData.group_count}
-                            onChange={(e) => setFormData({ ...formData, group_count: parseInt(e.target.value) })}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">ปีการศึกษา (ตัวเลือกเสริม)</label>
-                        <div className="text-xs text-gray-400 mt-2 italic">อ้างอิงตามกลุ่ม</div>
-                    </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">อาจารย์ที่ปรึกษา</label>
-                  <input
-                    required
-                    type="text"
-                    placeholder="ระบุชื่อ-นามสกุล อาจารย์"
-                    className="w-full border rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 outline-none transition-shadow"
-                    value={formData.advisor}
-                    onChange={(e) => setFormData({ ...formData, advisor: e.target.value })}
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className={`w-full mt-6 text-white py-3 rounded-xl font-bold shadow-lg transition-all active:scale-95 ${
-                      isEditing 
-                      ? "bg-amber-500 hover:bg-amber-600 shadow-amber-200" 
-                      : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200"
-                  }`}
-                >
-                  {isEditing ? "บันทึกการแก้ไข" : "บันทึกกลุ่มเรียน"}
-                </button>
-              </form>
+              <button onClick={handleOpenAdd} className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-lg flex items-center gap-2 shadow-lg shadow-emerald-200">
+                <Plus className="w-5 h-5" /> เพิ่มกลุ่มเรียน
+              </button>
             </div>
           </div>
-        )}
+
+          {/* Grid */}
+          <div className="flex-1 p-6 bg-slate-50/50 overflow-y-auto">
+            {loading ? <div className="text-center py-20 text-slate-400">Loading...</div> : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                {filtered.map((g) => (
+                  <div key={g.group_id} className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-xl hover:border-emerald-200 transition-all relative overflow-hidden group">
+                     <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-50 rounded-bl-full -mr-10 -mt-10"></div>
+                     <div className="relative z-10">
+                       <h3 className="text-lg font-bold text-slate-800">{g.group_name}</h3>
+                       <p className="text-xs text-emerald-600 font-bold mb-3">{g.group_id}</p>
+                       
+                       <div className="space-y-2 mb-4">
+                         <div className="flex justify-between items-center text-sm text-slate-600 bg-slate-50 p-2 rounded">
+                            <span className="flex items-center gap-1"><Users className="w-4 h-4 text-slate-400"/> จำนวน</span>
+                            <span className="font-bold text-slate-800">{g.group_count} คน</span>
+                         </div>
+                         <div className="text-xs text-slate-500">
+                            ที่ปรึกษา: <span className="font-medium text-slate-700">{g.advisor || "-"}</span>
+                         </div>
+                       </div>
+                     </div>
+
+                     <div className="flex gap-2 pt-3 border-t border-slate-100 opacity-60 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => handleOpenEdit(g)} className="flex-1 py-1.5 flex items-center justify-center gap-1.5 text-xs font-medium bg-amber-50 text-amber-600 rounded hover:bg-amber-100">
+                          <Pencil className="w-3.5 h-3.5" /> แก้ไข
+                        </button>
+                        <button onClick={() => handleDelete(g.group_id)} className="flex-1 py-1.5 flex items-center justify-center gap-1.5 text-xs font-medium bg-red-50 text-red-600 rounded hover:bg-red-100">
+                          <Trash2 className="w-3.5 h-3.5" /> ลบ
+                        </button>
+                      </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 animate-in zoom-in-95">
+             <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-bold text-slate-800">{isEditing ? "แก้ไขข้อมูล" : "เพิ่มกลุ่มเรียนใหม่"}</h2>
+              <button onClick={() => setIsModalOpen(false)}><X className="w-5 h-5 text-slate-400" /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500">รหัสกลุ่มเรียน</label>
+                <input required readOnly={isEditing} value={formData.group_id} onChange={e => setFormData({...formData, group_id: e.target.value})} 
+                  className={`w-full p-2 border rounded-lg ${isEditing ? 'bg-slate-100' : ''}`} />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500">ชื่อกลุ่มเรียน</label>
+                <input required value={formData.group_name} onChange={e => setFormData({...formData, group_name: e.target.value})} 
+                  className="w-full p-2 border rounded-lg" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500">อาจารย์ที่ปรึกษา</label>
+                <input value={formData.advisor} onChange={e => setFormData({...formData, advisor: e.target.value})} 
+                  className="w-full p-2 border rounded-lg" placeholder="ระบุชื่ออาจารย์" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500">จำนวนนักศึกษา</label>
+                <input type="number" required value={formData.group_count} onChange={e => setFormData({...formData, group_count: Number(e.target.value)})} 
+                  className="w-full p-2 border rounded-lg" />
+              </div>
+              <button type="submit" className="w-full py-3 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 mt-2">บันทึกข้อมูล</button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

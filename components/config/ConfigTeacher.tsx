@@ -1,208 +1,163 @@
 "use client";
 
 import { useState, useEffect } from "react";
-// ✅ แก้ไข: เปลี่ยน BadgeID เป็น IdCard
-import { Plus, Users, X, ChevronLeft, Trash2, Pencil, IdCard } from "lucide-react";
+import { Plus, Users, X, ChevronLeft, Trash2, Pencil, Search, AlertCircle, Save, UserCircle } from "lucide-react";
 
-interface ConfigTeacherProps {
-  onClose: () => void;
+interface ConfigTeacherProps { onClose: () => void; }
+
+interface Teacher {
+  teacher_id: string;
+  teacher_name: string;
+  role: string;
 }
 
 export default function ConfigTeacher({ onClose }: ConfigTeacherProps) {
-  // ✅ 1. Interface ตรงกับ Prisma Model: Teacher
-  interface Teacher {
-    teacher_id: string;
-    teacher_name: string;
-    role: string;
-  }
-
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState({ teacher_id: "", teacher_name: "", role: "อาจารย์ประจำ" });
 
-  // ✅ 2. Form Data
-  const [formData, setFormData] = useState({
-    teacher_id: "",
-    teacher_name: "",
-    role: "อาจารย์ที่ปรึกษา", // Default
-  });
-
-  useEffect(() => {
-    fetchTeachers();
-  }, []);
+  useEffect(() => { fetchTeachers(); }, []);
 
   const fetchTeachers = async () => {
+    setLoading(true);
     try {
       const res = await fetch("/api/config/teacher");
-      if (res.ok) {
-        const data = await res.json();
-        setTeachers(data);
-      }
-    } catch (error) {
-      console.error("Error fetching teachers:", error);
-    } finally {
-      setLoading(false);
-    }
+      if (res.ok) setTeachers(await res.json());
+    } finally { setLoading(false); }
   };
+
+  const filtered = teachers.filter(t => 
+    t.teacher_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    t.teacher_id.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const handleOpenAdd = () => {
     setIsEditing(false);
-    setFormData({ teacher_id: "", teacher_name: "", role: "อาจารย์ที่ปรึกษา" });
+    setFormData({ teacher_id: "", teacher_name: "", role: "อาจารย์ประจำ" });
     setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (teacher: Teacher) => {
+  const handleOpenEdit = (t: Teacher) => {
     setIsEditing(true);
-    setFormData({
-      teacher_id: teacher.teacher_id,
-      teacher_name: teacher.teacher_name,
-      role: teacher.role,
-    });
+    setFormData(t);
     setIsModalOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(`คุณต้องการลบอาจารย์ ${id} ใช่หรือไม่?`)) return;
-    try {
-      const res = await fetch(`/api/config/teacher?id=${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error();
-      alert("ลบข้อมูลเรียบร้อย!");
-      fetchTeachers();
-    } catch (error) {
-      alert("เกิดข้อผิดพลาดในการลบ");
-    }
+    if (!confirm(`ยืนยันลบ ${id}?`)) return;
+    await fetch(`/api/config/teacher?id=${id}`, { method: "DELETE" });
+    fetchTeachers();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      const method = isEditing ? "PUT" : "POST";
-      const res = await fetch("/api/config/teacher", {
-        method: method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        alert(err.error);
-        return;
-      }
-
-      alert(isEditing ? "แก้ไขข้อมูลเรียบร้อย!" : "เพิ่มอาจารย์เรียบร้อย!");
-      setIsModalOpen(false);
-      fetchTeachers();
-    } catch (error) {
-      alert("เกิดข้อผิดพลาด");
-    }
+    const res = await fetch("/api/config/teacher", {
+      method: isEditing ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(formData),
+    });
+    if (!res.ok) return alert("เกิดข้อผิดพลาด");
+    setIsModalOpen(false);
+    fetchTeachers();
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-50 z-40 overflow-y-auto animate-in slide-in-from-bottom-10 fade-in duration-300">
-      <div className="p-6 max-w-7xl mx-auto min-h-screen">
-        
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8 sticky top-0 bg-gray-50/95 backdrop-blur py-4 z-10 border-b border-gray-200">
-          <div>
-            <button onClick={onClose} className="flex items-center gap-1 text-gray-500 hover:text-indigo-600 mb-1 transition-colors">
-                <ChevronLeft className="w-5 h-5" /> ย้อนกลับ
-            </button>
-            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-              <Users className="w-8 h-8 text-indigo-600" />
-              จัดการข้อมูลอาจารย์
-            </h1>
-          </div>
-          <div className="flex gap-3">
-             <button onClick={handleOpenAdd} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 shadow-md">
+    <div className="fixed inset-0 bg-slate-100/80 backdrop-blur-sm z-50 overflow-y-auto animate-in fade-in duration-200">
+      <div className="min-h-screen p-4 md:p-8">
+        <div className="max-w-7xl mx-auto bg-white min-h-[90vh] rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+          {/* Header */}
+          <div className="p-6 border-b border-slate-100 bg-white sticky top-0 z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600">
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                  <Users className="w-7 h-7 text-indigo-600" /> จัดการข้อมูลอาจารย์
+                </h1>
+                <p className="text-slate-500 text-sm">จำนวน {teachers.length} ท่าน</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="relative group">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input type="text" placeholder="ค้นหาชื่อ..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 w-64" />
+              </div>
+              <button onClick={handleOpenAdd} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg flex items-center gap-2 shadow-lg shadow-indigo-200">
                 <Plus className="w-5 h-5" /> เพิ่มอาจารย์
-            </button>
-            <button onClick={onClose} className="p-2 bg-white hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-full border shadow-sm">
-                <X className="w-6 h-6" />
-            </button>
-          </div>
-        </div>
-
-        {/* Grid Layout */}
-        {loading ? (
-          <div className="flex items-center justify-center h-64 text-gray-400">Loading...</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
-            {teachers.map((t) => (
-              <div key={t.teacher_id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-lg transition-all relative overflow-hidden group">
-                
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xl">
-                    {t.teacher_name.charAt(0)}
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-800 line-clamp-1">{t.teacher_name}</h3>
-                    <p className="text-sm text-indigo-500 font-medium">{t.teacher_id}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-2 mb-4">
-                    <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-lg">
-                        {/* ✅ แก้ไข: ใช้ IdCard แทน BadgeID */}
-                        <IdCard className="w-4 h-4 text-gray-400" />
-                        <span>ตำแหน่ง: <span className="font-bold text-gray-800">{t.role}</span></span>
-                    </div>
-                </div>
-
-                <div className="flex items-center justify-end border-t pt-3 border-gray-100 gap-1">
-                    <button onClick={() => handleOpenEdit(t)} className="p-1.5 text-gray-400 hover:text-amber-500 bg-gray-50 rounded-md">
-                        <Pencil className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => handleDelete(t.teacher_id)} className="p-1.5 text-gray-400 hover:text-red-500 bg-gray-50 rounded-md">
-                        <Trash2 className="w-4 h-4" />
-                    </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Modal Form */}
-        {isModalOpen && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-60 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl scale-100 animate-in zoom-in-95 duration-200 border border-gray-100">
-              <div className="flex justify-between items-center mb-6 border-b pb-4">
-                <h2 className="text-xl font-bold text-gray-800">{isEditing ? "แก้ไขข้อมูลอาจารย์" : "เพิ่มอาจารย์ใหม่"}</h2>
-                <button onClick={() => setIsModalOpen(false)}><X className="w-6 h-6 text-gray-400" /></button>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">รหัสอาจารย์</label>
-                        <input required type="text" readOnly={isEditing} 
-                            className={`w-full border rounded-lg p-2 ${isEditing ? 'bg-gray-100' : ''}`}
-                            value={formData.teacher_id} onChange={(e) => setFormData({ ...formData, teacher_id: e.target.value })} 
-                        />
-                    </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล</label>
-                  <input required type="text" className="w-full border rounded-lg p-2"
-                    value={formData.teacher_name} onChange={(e) => setFormData({ ...formData, teacher_name: e.target.value })} />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ตำแหน่ง (Role)</label>
-                  <input required type="text" className="w-full border rounded-lg p-2"
-                    placeholder="เช่น อาจารย์ที่ปรึกษา, หัวหน้าสาขา"
-                    value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })} />
-                </div>
-
-                <button type="submit" className={`w-full mt-4 py-3 rounded-xl font-bold shadow-lg text-white ${isEditing ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
-                  {isEditing ? "บันทึกการแก้ไข" : "บันทึกอาจารย์"}
-                </button>
-              </form>
+              </button>
             </div>
           </div>
-        )}
+
+          {/* Grid */}
+          <div className="flex-1 p-6 bg-slate-50/50 overflow-y-auto">
+            {loading ? <div className="text-center py-20 text-slate-400">Loading...</div> : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                {filtered.map((t) => (
+                  <div key={t.teacher_id} className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-xl hover:border-indigo-200 transition-all relative overflow-hidden group">
+                     <div className="flex items-center gap-4 mb-4">
+                        <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-lg">
+                          {t.teacher_name.charAt(0)}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-slate-800">{t.teacher_name}</h3>
+                          <span className="text-xs text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded">{t.teacher_id}</span>
+                        </div>
+                     </div>
+                     <div className="mb-4">
+                        <span className="text-sm text-slate-500 flex items-center gap-1">
+                          <UserCircle className="w-4 h-4" /> {t.role}
+                        </span>
+                     </div>
+                     <div className="flex gap-2 pt-3 border-t border-slate-100 opacity-60 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => handleOpenEdit(t)} className="flex-1 py-1.5 flex items-center justify-center gap-1.5 text-xs font-medium bg-amber-50 text-amber-600 rounded hover:bg-amber-100">
+                          <Pencil className="w-3.5 h-3.5" /> แก้ไข
+                        </button>
+                        <button onClick={() => handleDelete(t.teacher_id)} className="flex-1 py-1.5 flex items-center justify-center gap-1.5 text-xs font-medium bg-red-50 text-red-600 rounded hover:bg-red-100">
+                          <Trash2 className="w-3.5 h-3.5" /> ลบ
+                        </button>
+                      </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+
+      {/* Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 animate-in zoom-in-95">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-bold text-slate-800">{isEditing ? "แก้ไขข้อมูล" : "เพิ่มอาจารย์ใหม่"}</h2>
+              <button onClick={() => setIsModalOpen(false)}><X className="w-5 h-5 text-slate-400" /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500">รหัสอาจารย์</label>
+                <input required readOnly={isEditing} value={formData.teacher_id} onChange={e => setFormData({...formData, teacher_id: e.target.value})} 
+                  className={`w-full p-2 border rounded-lg ${isEditing ? 'bg-slate-100' : ''}`} />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500">ชื่อ-นามสกุล</label>
+                <input required value={formData.teacher_name} onChange={e => setFormData({...formData, teacher_name: e.target.value})} 
+                  className="w-full p-2 border rounded-lg" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500">ตำแหน่ง</label>
+                <input required value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} 
+                  className="w-full p-2 border rounded-lg" />
+              </div>
+              <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 mt-2">บันทึกข้อมูล</button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

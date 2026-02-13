@@ -5,6 +5,8 @@ import ConfigRoom from "@/components/config/ConfigRoom";
 import ConfigSubject from "@/components/config/ConfigSubject";
 import ConfigTeacher from "@/components/config/ConfigTeacher";
 import ConfigStudentGroup from "@/components/config/ConfigStudentGroup";
+import ConfigRes from "@/components/config/ConfigStudentRes";
+import ConfigTeach from "@/components/config/ConfigTeach";
 import AIChatPanel from "@/components/aichatpanel";
 import MasterScheduleTable from "@/components/MasterScheduleTable";
 
@@ -12,10 +14,9 @@ import {
   School, LayoutGrid,
   Users, BookOpen, MessageSquare,
   Upload, Download, ChevronDown,
-  Settings, CheckCircle, AlertCircle
+  Settings, CheckCircle, FileSpreadsheet, FileText, Files, FileBadge
 } from "lucide-react";
 
-// Type สำหรับตารางแต่ละกลุ่ม
 interface GroupScheduleData {
   group_id: string;
   group_name: string;
@@ -28,25 +29,19 @@ interface GroupScheduleData {
 }
 
 export default function Home() {
-  // State
   const [groupSchedules, setGroupSchedules] = useState<GroupScheduleData[]>([]);
   const [activeGroupIndex, setActiveGroupIndex] = useState(0);
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   
-  // Data State
   const [schoolName, setSchoolName] = useState("AI Scheduler Assistant");
   const [slots, setSlots] = useState<any[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
-  // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportDropdownRef = useRef<HTMLDivElement>(null);
 
-  // ==========================================
-  // 🔄 Initial Load
-  // ==========================================
   useEffect(() => {
     fetch("/api/master-data")
       .then((res) => res.json())
@@ -55,7 +50,6 @@ export default function Home() {
           setSlots(data.slots);
           setSchoolName(data.schoolName || "AI Scheduler");
         }
-
         if (data.groups && Array.isArray(data.groups)) {
           const initialGroups = data.groups.map((g: any) => ({
             group_id: g.group_id,
@@ -72,7 +66,6 @@ export default function Home() {
       .finally(() => setIsLoadingData(false));
   }, []);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
@@ -83,14 +76,9 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // ==========================================
-  // 🎮 Handlers
-  // ==========================================
-
   const handleScheduleUpdate = (data: any) => {
-    // กรณี AI ส่งข้อมูลกลับมา
     if (Array.isArray(data) && data.length > 0 && data[0]?.group_id) {
-      setGroupSchedules(data); // Replace all groups
+      setGroupSchedules(data);
       setActiveGroupIndex(0);
     } else if (Array.isArray(data)) {
       setGroupSchedules(prev => {
@@ -108,33 +96,24 @@ export default function Home() {
   const activeGroup = groupSchedules[activeGroupIndex];
   const activeSchedule = activeGroup?.schedule || [];
 
-  // 📥 IMPORT Handler (Smart Detection)
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     const formData = new FormData();
     formData.append("file", file);
-    
-    // ส่ง group_id ไปด้วย เผื่อว่าเป็นไฟล์ตารางสอนที่ไม่มี header ระบุกลุ่ม
     if (activeGroup) {
       formData.append("group_id", activeGroup.group_id);
     }
 
     try {
-      const res = await fetch("/api/import-schedule", {
-        method: "POST",
-        body: formData,
-      });
-
+      const res = await fetch("/api/import-schedule", { method: "POST", body: formData });
       const data = await res.json();
 
       if (data.success) {
         alert(`✅ Import สำเร็จ!\nประเภท: ${data.type}\nจำนวน: ${data.imported_count} รายการ`);
-        
-        // ถ้าเป็น Schedule ให้รีโหลดหน้าจอ
         if (data.type === "Schedule" || data.type === "Student Groups") {
-             window.location.reload(); 
+            window.location.reload(); 
         }
       } else {
         alert(`❌ Import ล้มเหลว: ${data.error}`);
@@ -142,29 +121,41 @@ export default function Home() {
     } catch (error: any) {
       alert(`❌ เกิดข้อผิดพลาด: ${error.message}`);
     }
-
-    // Reset Input
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // 📤 EXPORT Handler
-  const handleExport = async (format: "csv" | "xlsx") => {
-    if (!activeGroup || activeSchedule.length === 0) {
-      alert("⚠️ ไม่มีข้อมูลตารางสอนให้ Export");
+  // ✅ UPDATED: Export Handler รองรับ PDF + All Groups
+  const handleExport = async (format: "csv" | "xlsx" | "pdf", scope: "current" | "all") => {
+    // Validation
+    if (scope === "current" && (!activeGroup || activeSchedule.length === 0)) {
+      alert("⚠️ ไม่มีข้อมูลตารางสอนในกลุ่มปัจจุบัน");
       return;
+    }
+    if (scope === "all" && groupSchedules.every(g => !g.schedule || g.schedule.length === 0)) {
+        alert("⚠️ ไม่มีข้อมูลตารางสอนเลยสักกลุ่ม");
+        return;
     }
 
     try {
+      const payload = scope === "all" 
+        ? { 
+            mode: "all", 
+            groups: groupSchedules,
+            format: format
+          }
+        : { 
+            mode: "single",
+            schedule: activeSchedule,
+            group_id: activeGroup.group_id,
+            group_name: activeGroup.group_name,
+            advisor: activeGroup.advisor,
+            format: format
+          };
+
       const res = await fetch("/api/export-schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          schedule: activeSchedule,
-          group_id: activeGroup.group_id,
-          group_name: activeGroup.group_name,
-          advisor: activeGroup.advisor,
-          format: format
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (res.ok) {
@@ -172,7 +163,15 @@ export default function Home() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `Schedule_${activeGroup.group_name.replace(/\s+/g, '_')}.${format}`;
+        
+        // ตั้งชื่อไฟล์
+        if (scope === "all") {
+             const ext = format === 'pdf' ? 'pdf' : (format === 'csv' ? 'csv' : 'xlsx');
+             a.download = `All_Schedules_${new Date().toISOString().slice(0,10)}.${ext}`;
+        } else {
+             a.download = `Schedule_${activeGroup.group_name.replace(/\s+/g, '_')}.${format}`;
+        }
+        
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -187,9 +186,6 @@ export default function Home() {
     setShowExportDropdown(false);
   };
 
-  // ==========================================
-  // 🎨 Render UI
-  // ==========================================
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 font-sans selection:bg-indigo-100 pb-20">
       
@@ -197,7 +193,7 @@ export default function Home() {
       <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200 shadow-sm">
         <div className="max-w-[1600px] mx-auto px-6 h-20 flex items-center justify-between">
           
-          {/* Logo & School Name */}
+          {/* Logo */}
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
               <School className="w-6 h-6" />
@@ -212,7 +208,6 @@ export default function Home() {
 
           {/* Action Buttons */}
           <div className="flex items-center gap-3">
-            {/* Import */}
             <button
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors border border-emerald-200 font-medium text-sm"
@@ -220,15 +215,9 @@ export default function Home() {
               <Upload className="w-4 h-4" />
               <span>Import Data</span>
             </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.csv"
-              onChange={handleImport}
-              className="hidden"
-            />
+            <input ref={fileInputRef} type="file" accept=".xlsx,.csv" onChange={handleImport} className="hidden" />
 
-            {/* Export Dropdown */}
+            {/* ✅ UPDATED: Export Dropdown with PDF */}
             <div className="relative" ref={exportDropdownRef}>
               <button
                 onClick={() => setShowExportDropdown(!showExportDropdown)}
@@ -240,23 +229,62 @@ export default function Home() {
               </button>
 
               {showExportDropdown && (
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
-                  <div className="px-4 py-2 bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-100">
-                    Select Format
+                <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
+                  
+                  {/* Current Group Section */}
+                  <div className="px-4 py-2 bg-slate-50 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                    Current Group Only
                   </div>
-                  <button onClick={() => handleExport("csv")} className="w-full px-4 py-3 text-left hover:bg-indigo-50 flex items-center gap-3 text-slate-700 group">
-                    <span className="p-1.5 bg-green-100 text-green-700 rounded text-xs font-bold group-hover:bg-green-200">CSV</span>
-                    <span className="text-sm">Comma Separated</span>
+                  <button 
+                    onClick={() => handleExport("csv", "current")} 
+                    className="w-full px-4 py-3 text-left hover:bg-indigo-50 flex items-center gap-3 text-slate-700 group"
+                  >
+                    <FileText className="w-4 h-4 text-green-600" />
+                    <span className="text-sm">Export CSV</span>
                   </button>
-                  <button onClick={() => handleExport("xlsx")} className="w-full px-4 py-3 text-left hover:bg-indigo-50 flex items-center gap-3 text-slate-700 group border-t border-slate-50">
-                    <span className="p-1.5 bg-green-600 text-white rounded text-xs font-bold group-hover:bg-green-700">XLS</span>
-                    <span className="text-sm">Excel Workbook</span>
+                  <button 
+                    onClick={() => handleExport("xlsx", "current")} 
+                    className="w-full px-4 py-3 text-left hover:bg-indigo-50 flex items-center gap-3 text-slate-700 group"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-green-600" />
+                    <span className="text-sm">Export Excel</span>
+                  </button>
+                  <button 
+                    onClick={() => handleExport("pdf", "current")} 
+                    className="w-full px-4 py-3 text-left hover:bg-red-50 flex items-center gap-3 text-slate-700 group border-b border-slate-100"
+                  >
+                    <FileBadge className="w-4 h-4 text-red-600" />
+                    <span className="text-sm font-medium">Export PDF</span>
+                  </button>
+
+                  {/* All Groups Section */}
+                  <div className="px-4 py-2 bg-slate-50 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                    All Groups
+                  </div>
+                  <button 
+                    onClick={() => handleExport("xlsx", "all")} 
+                    className="w-full px-4 py-3 text-left hover:bg-purple-50 flex items-center gap-3 text-slate-700 group bg-purple-50/30"
+                  >
+                    <Files className="w-4 h-4 text-purple-600" />
+                    <div className="flex flex-col">
+                        <span className="text-sm font-semibold text-purple-700">Export All (Excel)</span>
+                        <span className="text-[10px] text-purple-500">Multi-sheet workbook</span>
+                    </div>
+                  </button>
+                  <button 
+                    onClick={() => handleExport("pdf", "all")} 
+                    className="w-full px-4 py-3 text-left hover:bg-purple-50 flex items-center gap-3 text-slate-700 group bg-purple-50/30"
+                  >
+                    <FileBadge className="w-4 h-4 text-purple-600" />
+                    <div className="flex flex-col">
+                        <span className="text-sm font-semibold text-purple-700">Export All (PDF)</span>
+                        <span className="text-[10px] text-purple-500">Multi-page document</span>
+                    </div>
                   </button>
                 </div>
               )}
             </div>
 
-            {/* AI Chat Toggle */}
             <button
               onClick={() => setIsChatOpen(true)}
               className="ml-2 flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white hover:bg-slate-800 rounded-lg shadow-lg shadow-slate-200 transition-all font-medium text-sm"
@@ -271,10 +299,9 @@ export default function Home() {
       {/* 2. Main Content */}
       <main className="max-w-[1600px] mx-auto px-6 py-8 space-y-6">
         
-        {/* Group Selector & Info */}
+        {/* Group Selector */}
         {groupSchedules.length > 0 && (
           <div className="bg-white rounded-2xl p-1 shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 md:items-center">
-             {/* Left: Tabs */}
             <div className="flex-1 overflow-x-auto no-scrollbar py-2 px-2 flex gap-2">
               {groupSchedules.map((group, index) => (
                 <button
@@ -296,7 +323,6 @@ export default function Home() {
               ))}
             </div>
 
-            {/* Right: Active Group Info */}
             {activeGroup && (
                <div className="px-6 py-2 border-l border-slate-100 flex items-center gap-6 text-sm text-slate-600 bg-slate-50/50 rounded-r-xl">
                  <div className="flex items-center gap-2">
@@ -314,7 +340,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* 3. Schedule Table Area */}
+        {/* 3. Schedule Table */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden min-h-[600px] relative">
             {isLoadingData ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-10">
@@ -332,7 +358,7 @@ export default function Home() {
             )}
         </div>
 
-        {/* 4. Developer / Config Zone */}
+        {/* 4. Config Zone */}
         <section className="pt-8">
             <div className="flex items-center gap-3 mb-6">
                 <div className="h-px flex-1 bg-slate-200"></div>
@@ -349,7 +375,9 @@ export default function Home() {
                     { id: "teacher", label: "จัดการครูผู้สอน", sub: "Teacher & Roles", icon: Users, color: "text-emerald-600", bg: "bg-emerald-50", border: "hover:border-emerald-200" },
                     { id: "subject", label: "ข้อมูลรายวิชา", sub: "Subjects & Credits", icon: BookOpen, color: "text-blue-600", bg: "bg-blue-50", border: "hover:border-blue-200" },
                     { id: "studentgroup", label: "กลุ่มเรียน", sub: "Class Groups", icon: Users, color: "text-orange-600", bg: "bg-orange-50", border: "hover:border-orange-200" },
-                ].map((item) => (
+                    { id: "teach", label: "จัดการสอนวิชา", sub: "Class Groups", icon: Users, color: "text-orange-600", bg: "bg-orange-50", border: "hover:border-orange-200" },
+                    { id: "res", label: "จัดการกลุ่มวิชาเรียน", sub: "Class Groups", icon: Users, color: "text-orange-600", bg: "bg-orange-50", border: "hover:border-orange-200" },
+                  ].map((item) => (
                     <button
                         key={item.id}
                         onClick={() => setActiveModal(item.id)}
@@ -369,17 +397,14 @@ export default function Home() {
 
       </main>
 
-      {/* ==========================================
-          MODALS & PANELS
-      ========================================== */}
-      
-      {/* Config Modals */}
+      {/* Modals */}
       {activeModal === "room" && <ConfigRoom onClose={() => setActiveModal(null)} />}
       {activeModal === "subject" && <ConfigSubject onClose={() => setActiveModal(null)} />}
       {activeModal === "teacher" && <ConfigTeacher onClose={() => setActiveModal(null)} />}
       {activeModal === "studentgroup" && <ConfigStudentGroup onClose={() => setActiveModal(null)} />}
+      {activeModal === "teach" && <ConfigTeach onClose={() => setActiveModal(null)} />}
+      {activeModal === "res" && <ConfigRes onClose={() => setActiveModal(null)} />}
 
-      {/* AI Chat Panel */}
       <AIChatPanel
         schedule={activeSchedule}
         onScheduleUpdate={handleScheduleUpdate}
@@ -387,19 +412,11 @@ export default function Home() {
         onClose={() => setIsChatOpen(false)}
       />
 
-      {/* Floating Chat Button */}
       {!isChatOpen && (
-        <button
-          onClick={() => setIsChatOpen(true)}
-          className="fixed bottom-8 right-8 p-4 bg-slate-900 text-white rounded-full shadow-2xl hover:shadow-3xl hover:scale-110 hover:-translate-y-1 transition-all z-40 group"
-        >
+        <button onClick={() => setIsChatOpen(true)} className="fixed bottom-8 right-8 p-4 bg-slate-900 text-white rounded-full shadow-2xl hover:shadow-3xl hover:scale-110 hover:-translate-y-1 transition-all z-40 group">
           <MessageSquare className="w-6 h-6 group-hover:rotate-12 transition-transform" />
-          <span className="absolute right-full mr-3 top-1/2 -translate-y-1/2 px-3 py-1 bg-slate-800 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 whitespace-nowrap transition-opacity pointer-events-none">
-            Ask AI Assistant
-          </span>
         </button>
       )}
-
     </div>
   );
 }

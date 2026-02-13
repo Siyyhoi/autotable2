@@ -1,89 +1,97 @@
 import { NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
 
 // ---------------------------------------------------------
-// 🟢 GET: ดึงข้อมูลวิชาทั้งหมด
+// 🟢 GET: ดึงข้อมูลการลงทะเบียนทั้งหมด
 // ---------------------------------------------------------
 export async function GET() {
   try {
     const client = await clientPromise;
     const db = client.db("autotable");
     
-    // Sort ตามรหัสวิชา
-    const subjects = await db.collection("Subject").find({}).sort({ _id: 1 }).toArray();
+    const registers = await db.collection("Register").find({}).toArray();
 
-    const formattedSubjects = subjects.map(s => ({
-      subject_id: s._id, // map _id กลับเป็น subject_id
-      subject_name: s.subject_name,
-      theory: s.theory,
-      practice: s.practice,
-      credit: s.credit
+    const formatted = registers.map(r => ({
+      id: r._id.toString(),
+      group_id: r.group_id,
+      subject_id: r.subject_id
     }));
 
-    return NextResponse.json(formattedSubjects);
+    return NextResponse.json(formatted);
   } catch (error) {
     return NextResponse.json({ error: "ดึงข้อมูลไม่สำเร็จ" }, { status: 500 });
   }
 }
 
 // ---------------------------------------------------------
-// 🔵 POST: เพิ่มวิชาใหม่
+// 🔵 POST: เพิ่มการลงทะเบียนใหม่
 // ---------------------------------------------------------
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { subject_id, subject_name, theory, practice, credit } = body;
+    const { group_id, subject_id } = body;
 
-    if (!subject_id || !subject_name || theory === undefined || practice === undefined || credit === undefined) {
-      return NextResponse.json({ error: "กรุณากรอกข้อมูลให้ครบ" }, { status: 400 });
+    if (!group_id || !subject_id) {
+      return NextResponse.json({ error: "กรุณาระบุรหัสกลุ่มเรียนและรหัสวิชา" }, { status: 400 });
     }
 
     const client = await clientPromise;
     const db = client.db("autotable");
 
-    // ใช้ _id เป็น subject_id เพื่อป้องกันรหัสซ้ำอัตโนมัติจาก MongoDB Index
-    const existing = await db.collection("Subject").findOne({ _id: subject_id });
-    if (existing) {
-      return NextResponse.json({ error: `รหัสวิชานี้ (${subject_id}) มีอยู่แล้ว` }, { status: 400 });
-    }
-
-    await db.collection("Subject").insertOne({
-      _id: subject_id,
-      subject_name,
-      theory: Number(theory),
-      practice: Number(practice),
-      credit: Number(credit)
+    // เช็ค Unique Constraint (กลุ่มนี้ลงวิชานี้ไปหรือยัง)
+    const existing = await db.collection("Register").findOne({ 
+      group_id: group_id, 
+      subject_id: subject_id 
     });
 
-    return NextResponse.json({ message: "เพิ่มวิชาสำเร็จ" });
+    if (existing) {
+      return NextResponse.json({ error: "กลุ่มเรียนนี้ลงทะเบียนวิชานี้ไปแล้ว" }, { status: 400 });
+    }
+
+    await db.collection("Register").insertOne({
+      group_id,
+      subject_id
+    });
+
+    return NextResponse.json({ message: "เพิ่มข้อมูลสำเร็จ" });
   } catch (error) {
     return NextResponse.json({ error: "เกิดข้อผิดพลาดในการบันทึก" }, { status: 500 });
   }
 }
 
 // ---------------------------------------------------------
-// 🟡 PUT: แก้ไขวิชา
+// 🟡 PUT: แก้ไขการลงทะเบียน
 // ---------------------------------------------------------
 export async function PUT(req: Request) {
   try {
     const body = await req.json();
-    const { subject_id, subject_name, theory, practice, credit } = body;
+    const { id, group_id, subject_id } = body;
 
-    if (!subject_id) {
-      return NextResponse.json({ error: "ไม่พบรหัสวิชา (subject_id)" }, { status: 400 });
+    if (!id || !ObjectId.isValid(id)) {
+      return NextResponse.json({ error: "ID ไม่ถูกต้อง" }, { status: 400 });
     }
 
     const client = await clientPromise;
     const db = client.db("autotable");
 
-    const result = await db.collection("Subject").updateOne(
-      { _id: subject_id },
+    // เช็คซ้ำ
+    const duplicate = await db.collection("Register").findOne({
+      group_id,
+      subject_id,
+      _id: { $ne: new ObjectId(id) }
+    });
+
+    if (duplicate) {
+      return NextResponse.json({ error: "ข้อมูลการลงทะเบียนนี้มีซ้ำอยู่ในระบบ" }, { status: 400 });
+    }
+
+    const result = await db.collection("Register").updateOne(
+      { _id: new ObjectId(id) },
       {
         $set: {
-          subject_name,
-          theory: Number(theory),
-          practice: Number(practice),
-          credit: Number(credit)
+          group_id,
+          subject_id
         }
       }
     );
@@ -99,21 +107,21 @@ export async function PUT(req: Request) {
 }
 
 // ---------------------------------------------------------
-// 🔴 DELETE: ลบวิชา
+// 🔴 DELETE: ลบการลงทะเบียน
 // ---------------------------------------------------------
 export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
 
-    if (!id) {
-      return NextResponse.json({ error: "กรุณาระบุ ID ที่ต้องการลบ" }, { status: 400 });
+    if (!id || !ObjectId.isValid(id)) {
+      return NextResponse.json({ error: "ID ไม่ถูกต้อง" }, { status: 400 });
     }
 
     const client = await clientPromise;
     const db = client.db("autotable");
 
-    const result = await db.collection<any>("Subject").deleteOne({ _id: id });
+    const result = await db.collection("Register").deleteOne({ _id: new ObjectId(id) });
 
     if (result.deletedCount === 0) {
       return NextResponse.json({ error: "ไม่พบข้อมูล หรือลบไม่สำเร็จ" }, { status: 404 });
