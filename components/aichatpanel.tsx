@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { 
+import {
   Brain, Send, X, MessageSquare, Sparkles,
   AlertCircle, Lightbulb, AlertTriangle, CheckCircle
 } from "lucide-react";
@@ -21,11 +21,11 @@ interface AIChatPanelProps {
   onClose: () => void;
 }
 
-export default function AIChatPanel({ 
-  schedule, 
-  onScheduleUpdate, 
-  isOpen, 
-  onClose 
+export default function AIChatPanel({
+  schedule,
+  onScheduleUpdate,
+  isOpen,
+  onClose
 }: AIChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -42,7 +42,8 @@ export default function AIChatPanel({
     "ตารางนี้เป็นยังไง",
     "ย้ายคาบ 6 ไปคาบ 3 วันจันทร์",
     "ลบคาบ 7 วันศุกร์",
-    "สลับคาบ 4 วันจันทร์ กับ วันอังคาร"
+    "สลับคาบ 4 วันจันทร์ กับ วันอังคาร",
+    "ช่วยจัดตารางหน่อย"
   ];
 
   const sendMessage = async () => {
@@ -71,8 +72,13 @@ export default function AIChatPanel({
 
       const data = await res.json();
 
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to fetch response");
+      }
+
       // อัปเดตตาราง
       if (Array.isArray(data.result)) {
+        console.log("Updated schedule:", data.result);
         onScheduleUpdate(data.result);
       }
 
@@ -87,16 +93,16 @@ export default function AIChatPanel({
 
       setMessages(prev => [...prev, assistantMessage]);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error:", error);
-      
+
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: "❌ เกิดข้อผิดพลาด: ไม่สามารถเชื่อมต่อ Server ได้",
+        content: `❌ เกิดข้อผิดพลาด: ${error.message || "ไม่สามารถเชื่อมต่อ Server ได้"}`,
         timestamp: new Date()
       };
-      
+
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setLoading(false);
@@ -150,11 +156,10 @@ export default function AIChatPanel({
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                msg.role === "user"
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-100 text-gray-800"
-              }`}
+              className={`max-w-[85%] rounded-2xl px-4 py-3 ${msg.role === "user"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-100 text-gray-800"
+                }`}
             >
               {/* Message Content */}
               <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
@@ -197,9 +202,9 @@ export default function AIChatPanel({
 
               {/* Timestamp */}
               <p className={`text-[10px] mt-2 ${msg.role === "user" ? "text-indigo-200" : "text-gray-500"}`}>
-                {msg.timestamp.toLocaleTimeString("th-TH", { 
-                  hour: "2-digit", 
-                  minute: "2-digit" 
+                {msg.timestamp.toLocaleTimeString("th-TH", {
+                  hour: "2-digit",
+                  minute: "2-digit"
                 })}
               </p>
             </div>
@@ -216,7 +221,7 @@ export default function AIChatPanel({
                   <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></div>
                   <div className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></div>
                 </div>
-                <span className="text-xs text-gray-600">AI กำลังคิด...</span>
+                <span className="text-xs text-gray-600">กำลังดำเนินการ...</span>
               </div>
             </div>
           </div>
@@ -238,11 +243,10 @@ export default function AIChatPanel({
           <button
             onClick={sendMessage}
             disabled={loading || !input.trim()}
-            className={`px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-2 ${
-              loading || !input.trim()
-                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                : "bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-lg"
-            }`}
+            className={`px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-2 ${loading || !input.trim()
+              ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+              : "bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-lg"
+              }`}
           >
             <Send className="w-4 h-4" />
           </button>
