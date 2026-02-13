@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import ConfigRoom from "@/components/config/ConfigRoom";
 import ConfigSubject from "@/components/config/ConfigSubject";
 import ConfigTeacher from "@/components/config/ConfigTeacher";
@@ -9,7 +9,8 @@ import MasterScheduleTable from "@/components/MasterScheduleTable";
 
 import {
   School, LayoutGrid,
-  Users, BookOpen, MessageSquare
+  Users, BookOpen, MessageSquare,
+  Upload, Download, ChevronDown
 } from "lucide-react";
 
 // Type สำหรับตารางแต่ละกลุ่ม
@@ -20,6 +21,7 @@ interface GroupScheduleData {
   schedule: any[];
   validation?: any;
   stats?: any;
+  failedTasks?: any[];
 }
 
 export default function Home() {
@@ -28,11 +30,16 @@ export default function Home() {
   const [activeGroupIndex, setActiveGroupIndex] = useState(0);
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
 
   // Data State
   const [schoolName, setSchoolName] = useState("AI Scheduler Assistant");
   const [slots, setSlots] = useState<any[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
+
+  // Refs
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
 
   // โหลดข้อมูล
   useEffect(() => {
@@ -53,12 +60,25 @@ export default function Home() {
             advisor: g.advisor,
             schedule: [], // เริ่มต้นว่างเปล่า
             validation: null,
-            stats: null
+            stats: null,
+            failedTasks: []
           }));
           setGroupSchedules(initialGroups);
         }
       })
       .finally(() => setIsLoadingData(false));
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
+        setShowExportDropdown(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Handler สำหรับ AIChatPanel
@@ -96,11 +116,7 @@ export default function Home() {
     if (!activeGroup) return;
     const groupId = activeGroup.group_id;
     try {
-      const res = await fetch("/api/debug-group", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ group_id: groupId }),
-      });
+      const res = await fetch(`/api/debug-group?groupId=${groupId}`);
       const data = await res.json();
 
       console.log("🔍 Debug Result:", data);
@@ -130,6 +146,97 @@ export default function Home() {
     }
   };
 
+  // 📥 Import Handler
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+    
+    // ส่ง group_id ของกลุ่มที่กำลัง active อยู่
+    if (activeGroup) {
+      formData.append("group_id", activeGroup.group_id);
+    }
+
+    try {
+      const res = await fetch("/api/import-schedule", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        alert(`✅ Import สำเร็จ!\n\nนำเข้า ${data.imported_count} รายการ`);
+        
+        // อัปเดตตารางของ group ที่ active
+        if (data.schedule && activeGroup) {
+          setGroupSchedules(prev => {
+            const updated = [...prev];
+            updated[activeGroupIndex] = {
+              ...updated[activeGroupIndex],
+              schedule: data.schedule
+            };
+            return updated;
+          });
+        }
+      } else {
+        alert(`❌ Import ล้มเหลว: ${data.error}`);
+      }
+    } catch (error: any) {
+      alert(`❌ เกิดข้อผิดพลาด: ${error.message}`);
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // 📤 Export Handler
+  const handleExport = async (format: "csv" | "xlsx") => {
+    if (!activeGroup || activeSchedule.length === 0) {
+      alert("⚠️ ไม่มีตารางให้ Export");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/export-schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schedule: activeSchedule,
+          group_id: activeGroup.group_id,
+          group_name: activeGroup.group_name,
+          advisor: activeGroup.advisor,
+          format: format
+        }),
+      });
+
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `schedule_${activeGroup.group_name}_${new Date().toISOString().split('T')[0]}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        alert(`✅ Export เป็น ${format.toUpperCase()} สำเร็จ!`);
+      } else {
+        const data = await res.json();
+        alert(`❌ Export ล้มเหลว: ${data.error}`);
+      }
+    } catch (error: any) {
+      alert(`❌ เกิดข้อผิดพลาด: ${error.message}`);
+    }
+
+    setShowExportDropdown(false);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-8 font-sans text-gray-800">
       <div className="max-w-[95%] mx-auto space-y-6">
@@ -149,7 +256,58 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* 🗑️ REMOVED Generate Button */}
+            {/* 📥 Import Button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 backdrop-blur-sm rounded-xl transition-all border-2 border-emerald-500 hover:border-emerald-400 shadow-lg"
+            >
+              <Upload className="w-5 h-5" />
+              <span className="font-semibold">Import</span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              onChange={handleImport}
+              className="hidden"
+            />
+
+            {/* 📤 Export Dropdown */}
+            <div className="relative" ref={exportDropdownRef}>
+              <button
+                onClick={() => setShowExportDropdown(!showExportDropdown)}
+                className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 backdrop-blur-sm rounded-xl transition-all border-2 border-blue-500 hover:border-blue-400 shadow-lg"
+              >
+                <Download className="w-5 h-5" />
+                <span className="font-semibold">Export</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${showExportDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showExportDropdown && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden z-50">
+                  <button
+                    onClick={() => handleExport("csv")}
+                    className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 text-gray-700"
+                  >
+                    <span className="text-xl">📄</span>
+                    <div>
+                      <div className="font-semibold text-sm">Export CSV</div>
+                      <div className="text-xs text-gray-500">Excel compatible</div>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => handleExport("xlsx")}
+                    className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 text-gray-700 border-t border-gray-100"
+                  >
+                    <span className="text-xl">📊</span>
+                    <div>
+                      <div className="font-semibold text-sm">Export XLSX</div>
+                      <div className="text-xs text-gray-500">Excel format</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* AI Chat Button */}
             <button
@@ -158,6 +316,15 @@ export default function Home() {
             >
               <MessageSquare className="w-5 h-5" />
               <span className="font-semibold">เปิด AI Chat</span>
+            </button>
+
+            {/* 🔍 Debug Button (Developer Zone) */}
+            <button
+              onClick={handleDebugGroup}
+              className="flex items-center gap-2 px-4 py-3 bg-gray-900/30 hover:bg-gray-900/50 backdrop-blur-sm rounded-xl text-xs transition-all border border-white/10"
+              title="ตรวจสอบข้อมูลกลุ่มนี้ (Debug)"
+            >
+              <span className="font-mono">🔍 Inspect Data</span>
             </button>
           </div>
         </div>
@@ -201,6 +368,7 @@ export default function Home() {
           isLoadingData={isLoadingData}
           groupName={activeGroup?.group_name} // 🛠️ Shows group name immediately
           advisor={activeGroup?.advisor}
+          failedTasks={activeGroup?.failedTasks || []}
         />
 
         {/* Developer Zone */}

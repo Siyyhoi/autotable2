@@ -258,66 +258,187 @@ function validateScheduleConstraints(schedule: any[], teachers: any[], subjects:
   const violations: string[] = [];
   const warnings: string[] = [];
 
-  // Constraint 1-4: จำนวนคาบต้องตรงกับ theory + practice
+  // Filter out non-subject entries (activities, meetings, homeroom)
+  const subjectSchedule = schedule.filter((s: any) => 
+    s.subject !== "HOME ROOM" && 
+    s.subject !== "MEETING" && 
+    s.subject !== "ACTIVITY" &&
+    s.type !== "Activity" &&
+    s.type !== "Meeting"
+  );
+
+  // Constraint 1: จำนวนคาบต้องมีค่าเท่ากับจำนวน theory+practice ใน subject
   subjects.forEach((subj: any) => {
     const sId = subj.subject_id || subj.id || subj._id;
-    const actual = schedule.filter((s: any) => s.subject === sId || s.subject === String(sId)).length;
+    const actual = subjectSchedule.filter((s: any) => 
+      s.subject === sId || s.subject === String(sId)
+    ).length;
     const expected = (subj.theory || 0) + (subj.practice || 0);
     if (actual !== expected) {
-      violations.push(`❌ Constraint 1-4: ${subj.subject_name} has ${actual} periods (expected ${expected})`);
+      violations.push(`❌ Constraint 1: ${subj.subject_name} (${sId}) has ${actual} periods (expected ${expected})`);
     }
   });
 
-  // Constraint 5: Max 10 periods per day
+  // Constraint 2: คาบ 5 ของทุกวันเป็นเวลาพัก (12:00-13:00)
+  const period5Classes = schedule.filter((s: any) => s.period === 5);
+  if (period5Classes.length > 0) {
+    violations.push(`❌ Constraint 2: Found ${period5Classes.length} classes during break time (period 5)`);
+  }
+
+  // ⚠️ NEW CONSTRAINT: ห้ามจัดคาบหลัง 18:00 (period > 10)
+  const lateClasses = schedule.filter((s: any) => s.period > 10);
+  if (lateClasses.length > 0) {
+    violations.push(`❌ NO CLASSES AFTER 18:00: Found ${lateClasses.length} classes after 18:00 (period 11-12): ${lateClasses.map((s: any) => `${s.subjectName} (${s.day} P${s.period})`).join(", ")}`);
+  }
+
+  // Constraint 3: จำนวนวิชาต้องเท่ากับจำนวนลงทะเบียน
+  // (This is checked at generation time - subjects array should match registered subjects)
+  const uniqueSubjects = new Set(subjectSchedule.map((s: any) => s.subject));
+  if (uniqueSubjects.size !== subjects.length) {
+    warnings.push(`⚠️ Constraint 3: Schedule has ${uniqueSubjects.size} unique subjects, expected ${subjects.length}`);
+  }
+
+  // Constraint 4: จำนวนคาบรวมต้องเท่ากันจำนวนคาบของแต่ละวิชาที่ลงทะเบียนเรียนรวมกันทั้งหมด
+  const totalExpectedPeriods = subjects.reduce((sum: number, subj: any) => 
+    sum + (subj.theory || 0) + (subj.practice || 0), 0
+  );
+  const totalActualPeriods = subjectSchedule.length;
+  if (totalActualPeriods !== totalExpectedPeriods) {
+    violations.push(`❌ Constraint 4: Total periods mismatch: ${totalActualPeriods} actual vs ${totalExpectedPeriods} expected`);
+  }
+
+  // Constraint 5: จำนวนคาบเรียนแต่ละวันต้องไม่เกิน 10 คาบ
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
   days.forEach(day => {
-    const count = schedule.filter((s: any) => s.day === day).length;
+    const count = subjectSchedule.filter((s: any) => s.day === day).length;
     if (count > 10) {
       violations.push(`❌ Constraint 5: ${day} has ${count} periods (max 10)`);
     }
   });
 
-  // Constraint 7: No overlapping teachers/rooms
-  const teacherSlots = new Set<string>();
-  const roomSlots = new Set<string>();
-  schedule.forEach((entry: any) => {
-    const teacherKey = `${entry.teacher}-${entry.day}-${entry.period}`;
-    const roomKey = `${entry.room}-${entry.day}-${entry.period}`;
-
-    if (teacherSlots.has(teacherKey)) {
-      violations.push(`❌ Constraint 7: Teacher ${entry.teacher} double-booked at ${entry.day} period ${entry.period}`);
+  // Constraint 6: ครูสอนต้องไม่ชนกัน
+  const teacherSlots = new Map<string, Set<string>>(); // teacher -> Set of "day-period"
+  subjectSchedule.forEach((entry: any) => {
+    const key = `${entry.day}-${entry.period}`;
+    if (!teacherSlots.has(entry.teacher)) {
+      teacherSlots.set(entry.teacher, new Set());
     }
-    if (roomSlots.has(roomKey)) {
-      violations.push(`❌ Constraint 7: Room ${entry.room} double-booked at ${entry.day} period ${entry.period}`);
+    const slots = teacherSlots.get(entry.teacher)!;
+    if (slots.has(key)) {
+      violations.push(`❌ Constraint 6: Teacher ${entry.teacher} double-booked at ${entry.day} period ${entry.period}`);
     }
-
-    teacherSlots.add(teacherKey);
-    roomSlots.add(roomKey);
+    slots.add(key);
   });
 
-  // Constraint 9: Theory → Theory room, Practice → Lab
-  schedule.forEach((entry: any) => {
-    const room = rooms.find((r: any) => r.room_name === entry.room || r.room_id === entry.room);
+  // Constraint 7: ห้องห้ามทับกัน
+  const roomSlots = new Map<string, Set<string>>(); // room -> Set of "day-period"
+  subjectSchedule.forEach((entry: any) => {
+    const key = `${entry.day}-${entry.period}`;
+    const roomId = entry.room;
+    if (!roomSlots.has(roomId)) {
+      roomSlots.set(roomId, new Set());
+    }
+    const slots = roomSlots.get(roomId)!;
+    if (slots.has(key)) {
+      violations.push(`❌ Constraint 7: Room ${roomId} double-booked at ${entry.day} period ${entry.period}`);
+    }
+    slots.add(key);
+  });
+
+  // Constraint 8: ครูสอนเฉพาะในไฟล์ teach เท่านั้น (checked at generation time)
+
+  // Helper: classify lab / theory room from room_type
+  const isLabRoomType = (roomTypeRaw: any) => {
+    const roomType = String(roomTypeRaw || "").toLowerCase();
+    if (!roomType) return false;
+    // นับเป็นห้องปฏิบัติ/แล็บ ถ้ามีคำว่า lab, แล็บ หรือ ปฏิบัติ
+    return roomType.includes("lab") || roomType.includes("แล็บ") || roomType.includes("ปฏิบัติ");
+  };
+
+  // Constraint 9: รายวิชาทฤษฎี (theory) จะต้องใช้ห้องเรียนทฤษฎีเท่านั้น วิชาปฎิบัติ ต้องใช้ห้องปฎิบัติ (Practice/Lab) เท่านั้น
+  subjectSchedule.forEach((entry: any) => {
+    const room = rooms.find((r: any) => 
+      r.room_name === entry.room || 
+      r.room_id === entry.room ||
+      r._id === entry.room
+    );
     if (room) {
-      if (entry.type === "Practice" && room.room_type !== "Practice" && room.room_type !== "Lab") {
-        warnings.push(`⚠️ Constraint 9: Practice class in non-lab room (${entry.room})`);
+      const labRoom = isLabRoomType(room.room_type);
+      if (entry.type === "Practice" && !labRoom) {
+        violations.push(`❌ Constraint 9: Practice class "${entry.subjectName}" in NON-lab room "${entry.room}" (type: ${room.room_type})`);
       }
-      if (entry.type === "Lecture" && (room.room_type === "Practice" || room.room_type === "Lab")) {
-        warnings.push(`⚠️ Constraint 9: Theory class in lab room (${entry.room})`);
+      if (entry.type === "Lecture" && labRoom) {
+        violations.push(`❌ Constraint 9: Theory class "${entry.subjectName}" scheduled in LAB room "${entry.room}" (type: ${room.room_type})`);
       }
     }
   });
 
-  // Constraint 12: Wed 15:00-17:00 should be free (periods 8-9)
-  const wedActivity = schedule.filter((s: any) => s.day === "Wed" && (s.period === 8 || s.period === 9));
-  if (wedActivity.length > 0) {
-    violations.push(`❌ Constraint 12: Found ${wedActivity.length} classes during Wed activity time (should be 0)`);
+  // Constraint 10: หัวหน้าแผนก (Leader) ต้องมีประชุมประจำสัปดาห์ทุกวันอังคาร ในเวลา 15:00-16:00 (คาบ 8)
+  const tue8Meeting = schedule.find((s: any) => 
+    s.day === "Tue" && s.period === 8 && (s.subject === "MEETING" || s.type === "Meeting")
+  );
+  if (!tue8Meeting) {
+    warnings.push(`⚠️ Constraint 10: No leader meeting scheduled on Tuesday period 8`);
   }
 
-  // Constraint 15: No theory after 17:00 (period >= 9)
-  const lateTheory = schedule.filter((s: any) => s.type === "Lecture" && s.period >= 9);
+  // Constraint 11: ในแต่ละสัปดาห์ต้องมีคาบโฮมรูม อย่างน้อย 1 ชม
+  const homeroomCount = schedule.filter((s: any) => 
+    s.subject === "HOME ROOM" || s.type === "Activity"
+  ).length;
+  if (homeroomCount === 0) {
+    warnings.push(`⚠️ Constraint 11: No homeroom scheduled`);
+  }
+
+  // Constraint 12: รายกิจกรรมต้องถูกจัดลงทุกวันพุธ เวลา 15:00-17:00 (คาบ 8 - 9)
+  const wedActivity = schedule.filter((s: any) => 
+    s.day === "Wed" && (s.period === 8 || s.period === 9) && 
+    (s.type === "Activity" || s.subject === "ACTIVITY")
+  );
+  const wedRegular = subjectSchedule.filter((s: any) => 
+    s.day === "Wed" && (s.period === 8 || s.period === 9)
+  );
+  if (wedRegular.length > 0) {
+    violations.push(`❌ Constraint 12: Found ${wedRegular.length} regular classes during Wed activity time (periods 8-9)`);
+  }
+  if (wedActivity.length < 2) {
+    warnings.push(`⚠️ Constraint 12: Only ${wedActivity.length} activity periods scheduled on Wednesday (expected 2)`);
+  }
+
+  // Constraint 13: วิชาสามัญ (20000/30000) ต้องถูกจัดเรียนร่วมกัน 2 กลุ่ม
+  // Note: This requires coordination between groups during generation
+  // For now, we check if general subjects are scheduled (validation per group)
+  const generalSubjects = subjects.filter((s: any) => {
+    const sId = String(s.subject_id || s.id || s._id);
+    return sId.startsWith("20000") || sId.startsWith("30000") || 
+           sId.match(/^2\d{4}/) || sId.match(/^3\d{4}/);
+  });
+  if (generalSubjects.length > 0) {
+    const scheduledGeneral = subjectSchedule.filter((s: any) => {
+      const sId = String(s.subject);
+      return sId.startsWith("20000") || sId.startsWith("30000") || 
+             sId.match(/^2\d{4}/) || sId.match(/^3\d{4}/);
+    });
+    if (scheduledGeneral.length > 0) {
+      warnings.push(`⚠️ Constraint 13: ${scheduledGeneral.length} general subjects scheduled - ensure they are coordinated with other groups for joint classes`);
+    }
+  }
+
+  // Constraint 14: ห้องเรียน iot รายวิชา iot ต้องเรียนที่ห้อง iot lab(R6201) เท่านั้น
+  const iotSubjects = subjectSchedule.filter((s: any) => {
+    const sId = s.subject?.toLowerCase() || "";
+    const sName = s.subjectName?.toLowerCase() || "";
+    return sId.includes("iot") || sName.includes("iot");
+  });
+  iotSubjects.forEach((entry: any) => {
+    if (entry.room !== "R6201" && !entry.room?.includes("R6201") && !entry.room?.toLowerCase().includes("iot")) {
+      violations.push(`❌ Constraint 14: IoT subject "${entry.subjectName}" not in IoT Lab (R6201), found in "${entry.room}"`);
+    }
+  });
+
+  // Constraint 15: หลีกเลี่ยงการจัดวิชาทฤษฎีหลังคาบที่ 9 (หลัง 17:00)
+  const lateTheory = subjectSchedule.filter((s: any) => s.type === "Lecture" && s.period >= 9);
   if (lateTheory.length > 0) {
-    warnings.push(`⚠️ Constraint 15: ${lateTheory.length} theory classes after 17:00`);
+    warnings.push(`⚠️ Constraint 15: ${lateTheory.length} theory classes scheduled after 17:00 (period 9+): ${lateTheory.map((s: any) => `${s.subjectName} (${s.day} P${s.period})`).join(", ")}`);
   }
 
   return {
@@ -360,14 +481,22 @@ async function generateSchedulesForAllGroups(prompt: string) {
   }
 
   // 3. Return ตารางทั้งหมด
+  const totalFailed = groupSchedules.reduce((sum, gs) => sum + (gs.failedTasks?.length || 0), 0);
+  
   return NextResponse.json({
-    message: `✅ สร้างตารางสำเร็จ ${groupSchedules.length} กลุ่ม`,
+    message: `✅ สร้างตารางสำเร็จ ${groupSchedules.length} กลุ่ม${totalFailed > 0 ? ` (มี ${totalFailed} คาบที่จัดไม่ได้)` : ''}`,
     groups: groupSchedules.map(gs => ({
       group_id: gs.group_id,
       group_name: gs.group_name,
-      totalClasses: gs.schedule.length
+      totalClasses: gs.schedule.length,
+      failedTasks: gs.failedTasks?.length || 0
     })),
-    result: groupSchedules
+    result: groupSchedules,
+    summary: {
+      totalGroups: groupSchedules.length,
+      totalFailedTasks: totalFailed,
+      groupsWithFailures: groupSchedules.filter(gs => (gs.failedTasks?.length || 0) > 0).length
+    }
   });
 }
 
@@ -388,11 +517,22 @@ async function generateScheduleForGroup(db: any, group: any) {
   const registers = await db.collection("Register").find({ group_id }).toArray();
   const subjectIds = registers.map((r: any) => r.subject_id);
 
-  const subjects = await db.collection("Subject").find({
+  const subjectsRaw = await db.collection("Subject").find({
     subject_id: { $in: subjectIds }
   }).toArray();
 
-  console.log(`   📖 ${group_name} registered ${subjects.length} subjects`);
+  // ⚠️ CRITICAL FIX: Remove duplicate subjects by subject_id
+  // CSV data may have duplicates, so we need to deduplicate before creating tasks
+  const subjectsMap = new Map();
+  subjectsRaw.forEach((subj: any) => {
+    const key = subj.subject_id || subj.id || subj._id;
+    if (!subjectsMap.has(key)) {
+      subjectsMap.set(key, subj);
+    }
+  });
+  const subjects = Array.from(subjectsMap.values());
+
+  console.log(`   📖 ${group_name} registered ${subjectsRaw.length} subjects (${subjects.length} unique after dedup)`);
 
   // 3. เรียกใช้ logic เดิมในการสร้างตารางด:\Projects\autotable2\app\api\generate\route.ts (แต่ส่ง subjects ที่กรองแล้ว)
   const scheduleData = await generateScheduleLogic({
@@ -410,7 +550,8 @@ async function generateScheduleForGroup(db: any, group: any) {
     advisor,
     schedule: scheduleData.schedule,
     validation: scheduleData.validation,
-    stats: scheduleData.stats
+    stats: scheduleData.stats,
+    failedTasks: scheduleData.failedTasks || [] // Include failed tasks
   };
 }
 
@@ -431,12 +572,15 @@ async function generateScheduleLogic(params: {
   // 2. เตรียม Grid ตารางเรียน (5 วัน x 10 คาบ)
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 
-  // ใช้ Timeslot ในการกำหนดจำนวนคาบ (ถ้าไม่มีให้ Default 10)
+  // ⚠️ CRITICAL: Maximum period is 10 (until 18:00) - ห้ามจัดหลัง 6 โมงเย็น
+  // แม้ว่า timeslots จะมี 12 คาบ แต่เราจัดได้แค่ถึงคาบ 10
+  const MAX_ALLOWED_PERIOD = 10;
+  
   const maxPeriods = timeslots.length > 0
-    ? Math.max(...timeslots.map((t: any) => t.period))
-    : 10;
+    ? Math.min(Math.max(...timeslots.map((t: any) => t.period)), MAX_ALLOWED_PERIOD)
+    : MAX_ALLOWED_PERIOD;
 
-  console.log(`✅ Using Max Periods: ${maxPeriods} (from ${timeslots.length} slots)`)
+  console.log(`✅ Using Max Periods: ${maxPeriods} (limit to period ${MAX_ALLOWED_PERIOD} - until 18:00)`)
 
     ;
 
@@ -448,9 +592,15 @@ async function generateScheduleLogic(params: {
   const busyRooms = new Set<string>();    // key: "RoomID-Day-Period"
   const busyGroups = new Set<string>();   // key: "Year-Day-Period" (สมมติแยกตามชั้นปี)
 
+  // Track failed tasks
+  const failedTasks: any[] = [];
+
   // 🔧 FIX: Track room usage to ensure fair distribution
   const roomUsage = new Map<string, number>(); // room_id -> usage count
-  rooms.forEach((r: any) => roomUsage.set(r.room_id, 0));
+  rooms.forEach((r: any) => {
+    const roomId = r.room_id || r._id;
+    roomUsage.set(roomId, 0);
+  });
 
   const markBusy = (teacherId: string, roomId: string, year: number | string, day: string, period: number) => {
     busyTeachers.add(`${teacherId}-${day}-${period}`);
@@ -498,22 +648,22 @@ async function generateScheduleLogic(params: {
   // 3.3 🎨 กิจกรรม (พุธ คาบ 8-9)
   // Constraint 12: รายกิจกรรมต้องถูกจัดลงทุกวันพุธ เวลา 15:00-17:00 (คาบ 8 - 9)
   // ค้นหาวิชากิจกรรมจาก Database แทนการ Hardcode
-  const activitySubjects = subjects.filter((s: any) =>
-    s.subject_name?.includes('กิจกรรม') &&
-    s.subject_name?.includes('องค์การ') // เอาเฉพาะกิจกรรมองค์การวิชาชีพ
-  );
+  const activitySubjects = subjects.filter((s: any) => {
+    const name = s.subject_name?.toLowerCase() || "";
+    return name.includes('กิจกรรม') || name.includes('ลูกเสือ') || name.includes('เนตรนารี') || name.includes('ชุมนุม');
+  });
 
   console.log(`📋 Found ${activitySubjects.length} activity subjects for Wednesday slots`);
 
   if (activitySubjects.length > 0) {
-    // ใส่วิชากิจกรรมที่เจอในคาบ 8-9
+    // ⚠️ CRITICAL FIX: Always use periods 8-9 for activities (2 consecutive hours)
+    // Each activity subject gets 2 consecutive periods
     const activityPeriods = [8, 9];
-
-    for (let i = 0; i < Math.min(activitySubjects.length, 2); i++) {
-      const activitySubj = activitySubjects[i];
-      const period = activityPeriods[i];
-      if (!period) continue;
-
+    
+    // Take only the first activity subject and give it both periods 8 and 9
+    const activitySubj = activitySubjects[0];
+    
+    for (let period of activityPeriods) {
       const activitySlot = timeslots.find((t: any) => t.period === period);
       const activityTime = activitySlot ? `${activitySlot.start}-${activitySlot.end}` : `Period ${period}`;
 
@@ -538,6 +688,8 @@ async function generateScheduleLogic(params: {
       // Block all resources for this activity
       markBusy("ACTIVITY", "ACTIVITY_AREA", "ALL", "Wed", period);
     }
+    
+    console.log(`   ✅ Scheduled activity "${activitySubj.subject_name}" on Wed periods 8-9 (2 consecutive hours)`);
   } else {
     // Fallback: ถ้าไม่มีวิชากิจกรรมในฐานข้อมูล ใช้ Hardcode เดิม
     [8, 9].forEach(period => {
@@ -599,9 +751,23 @@ async function generateScheduleLogic(params: {
       return;
     }
 
+    // ⚠️ CRITICAL FIX: Skip activity subjects - they're already scheduled on Wednesday
+    const subjName = subj.subject_name?.toLowerCase() || "";
+    const isActivity = subjName.includes('กิจกรรม') || subjName.includes('ลูกเสือ') || 
+                       subjName.includes('เนตรนารี') || subjName.includes('ชุมนุม');
+    
+    if (isActivity) {
+      console.log(`   ⏭️  SKIP: ${subj.subject_name} (Activity - already scheduled on Wed)`);
+      return; // Skip this subject entirely
+    }
+
     // Constraint 13: วิชาสามัญ (20000/30000) เรียนรวม 2 กลุ่ม -> ถือเป็น 1 Task ใหญ่ (ใช้ห้องใหญ่)
+    // Note: Full coordination between groups requires multi-group scheduling, 
+    // but we'll prefer larger rooms for general subjects
     const sIdStr = String(sId);
-    const isGeneral = sIdStr.startsWith("20000") || sIdStr.startsWith("30000") || sIdStr.startsWith("S2") || sIdStr.startsWith("S3");
+    const isGeneral = sIdStr.startsWith("20000") || sIdStr.startsWith("30000") || 
+                      sIdStr.startsWith("S2") || sIdStr.startsWith("S3") ||
+                      sIdStr.match(/^2\d{4}/) || sIdStr.match(/^3\d{4}/);
 
     // Constraint 9: Theory -> Lecture Room, Practice -> Practice Room
     // Create Theory Tasks
@@ -628,34 +794,190 @@ async function generateScheduleLogic(params: {
     }
   });
 
-  // Sort Tasks: เอาวิชายากๆ ลงก่อน (IoT, Practice, General)
-  tasks.sort((a, b) => {
-    const aId = a.id?.toLowerCase() || "";
-    const bId = b.id?.toLowerCase() || "";
-    if (aId.includes("iot") && !bId.includes("iot")) return -1; // IoT First
-    if (a.reqLab && !b.reqLab) return -1; // Lab First
-    if (a.isGeneral && !b.isGeneral) return -1; // General First
-    return 0;
+  // Group tasks by subject and type for consecutive scheduling
+  const taskGroups = new Map<string, any[]>();
+  tasks.forEach(task => {
+    const key = `${task.id}-${task.type}`;
+    if (!taskGroups.has(key)) {
+      taskGroups.set(key, []);
+    }
+    taskGroups.get(key)!.push(task);
   });
 
-  // 5. Greedy Allocation
-  for (const task of tasks) {
+  // Sort task groups by priority
+  const sortedGroups = Array.from(taskGroups.entries()).sort(([keyA, tasksA], [keyB, tasksB]) => {
+    const a = tasksA[0];
+    const b = tasksB[0];
+    const aId = a.id?.toLowerCase() || "";
+    const bId = b.id?.toLowerCase() || "";
+    
+    // Theory classes should be scheduled first (they have period 9+ restriction)
+    if (a.type === "Lecture" && b.type === "Practice") return -1;
+    if (a.type === "Practice" && b.type === "Lecture") return 1;
+    
+    // IoT subjects need specific room
+    if (aId.includes("iot") && !bId.includes("iot")) return -1;
+    if (!aId.includes("iot") && bId.includes("iot")) return 1;
+    
+    // General subjects prefer larger rooms
+    if (a.isGeneral && !b.isGeneral) return -1;
+    if (!a.isGeneral && b.isGeneral) return 1;
+    
+    // Prefer groups with more tasks (easier to schedule consecutively)
+    return tasksB.length - tasksA.length;
+  });
+
+  // Flatten back to tasks array, keeping groups together
+  const sortedTasks: any[] = [];
+  sortedGroups.forEach(([_, groupTasks]) => {
+    sortedTasks.push(...groupTasks);
+  });
+  tasks = sortedTasks;
+
+  // Helper: Count periods per day (excluding activities/meetings)
+  const getDayPeriodCount = (day: string) => {
+    return schedule.filter((s: any) => 
+      s.day === day && 
+      s.type !== "Activity" && 
+      s.type !== "Meeting" &&
+      s.subject !== "HOME ROOM"
+    ).length;
+  };
+
+  // Helper: Check if slot is available considering all constraints
+  const isSlotAvailable = (day: string, period: number, task: any, allowLateTheory: boolean = false) => {
+    // ⚠️ NEW CONSTRAINT: ห้ามจัดหลัง 18:00 (คาบ 10+) - STRICT
+    if (period > 10) {
+      return false;
+    }
+
+    // Constraint 2: คาบ 5 พัก (12:00-13:00) - STRICT
+    if (period === 5) return false;
+
+    // Constraint 5: Max 10 periods per day - STRICT
+    if (getDayPeriodCount(day) >= 10) return false;
+
+    // Constraint 12: พุธ คาบ 8-9 กิจกรรม - STRICT
+    if (day === "Wed" && (period === 8 || period === 9)) return false;
+
+    // Constraint 10: อังคาร คาบ 8 ประชุมหัวหน้าแผนก - STRICT
+    if (day === "Tue" && period === 8) return false;
+
+    // Constraint 15: หลีกเลี่ยง Theory หลัง 17:00 (คาบ 9+)
+    // Allow if allowLateTheory is true (for retry after initial attempt)
+    if (task.type === "Lecture" && period >= 9 && !allowLateTheory) return false;
+
+    return true;
+  };
+
+  console.log(`\n📊 Starting schedule generation:`);
+  console.log(`   Total tasks to schedule: ${tasks.length}`);
+  console.log(`   Theory tasks: ${tasks.filter(t => t.type === "Lecture").length}`);
+  console.log(`   Practice tasks: ${tasks.filter(t => t.type === "Practice").length}`);
+  console.log(`   Available rooms: ${rooms.length}`);
+  console.log(`   Available teachers: ${teachers.length}`);
+  console.log(`   Max periods per day: ${maxPeriods}\n`);
+
+  // Track how many periods have been scheduled for each subject+type
+  const scheduledPeriods = new Map<string, number>(); // key: "subjectId-type" -> count
+  
+  // Helper: Check if we've already scheduled enough periods for this subject+type
+  const getScheduledCount = (subjectId: string, type: string) => {
+    const key = `${subjectId}-${type}`;
+    return scheduledPeriods.get(key) || 0;
+  };
+  
+  const incrementScheduledCount = (subjectId: string, type: string) => {
+    const key = `${subjectId}-${type}`;
+    scheduledPeriods.set(key, (scheduledPeriods.get(key) || 0) + 1);
+  };
+  
+  const getExpectedCount = (subjectId: string, type: string) => {
+    const subject = subjects.find(s => (s.subject_id || s.id || s._id) === subjectId);
+    if (!subject) return 0;
+    return type === "Lecture" ? (subject.theory || 0) : (subject.practice || 0);
+  };
+
+  // 5. Improved Greedy Allocation with Consecutive Period Support
+  let currentTaskIndex = 0;
+  while (currentTaskIndex < tasks.length) {
+    const task = tasks[currentTaskIndex];
     let assigned = false;
+    
+    // CRITICAL FIX: Skip if we've already scheduled enough periods for this subject+type
+    const subjectId = task.id;
+    const taskType = task.type;
+    const expectedForThisType = getExpectedCount(subjectId, taskType);
+    const alreadyScheduled = getScheduledCount(subjectId, taskType);
+    
+    if (alreadyScheduled >= expectedForThisType) {
+      console.log(`   ✅ SKIP: ${task.subject_name} (${taskType}) already has ${alreadyScheduled}/${expectedForThisType} periods scheduled`);
+      currentTaskIndex++;
+      continue;
+    }
+    
+    // Helper: Check if consecutive periods are available (defined inside loop to access task.year)
+    const findConsecutiveSlots = (
+      day: string, 
+      startPeriod: number, 
+      count: number, 
+      task: any, 
+      teacherId: string, 
+      roomId: string,
+      allowLateTheory: boolean,
+      year: number | string
+    ): boolean => {
+      for (let i = 0; i < count; i++) {
+        const period = startPeriod + i;
+        if (!isSlotAvailable(day, period, task, allowLateTheory)) return false;
+        if (!isFree(teacherId, roomId, year, day, period)) return false;
+      }
+      return true;
+    };
 
     // หาครูที่สอนวิชานี้
-    console.log(`🔍 Looking for teacher for subject: ${task.id} (${task.subject_name})`);
+    console.log(`\n🔍 Task ${currentTaskIndex + 1}/${tasks.length}: ${task.id} (${task.subject_name}) - ${task.type}`);
 
     // Check if task.id is valid
     if (!task.id) {
-      console.error("❌ Task is missing ID!", task);
+      console.error("   ❌ Task is missing ID!", task);
+      currentTaskIndex++;
       continue;
     }
     const teachRelations = await db.collection("Teach").find({ subject_id: task.id }).toArray();
     let validTeachers = teachRelations.map((tr: any) => tr.teacher_id);
 
     if (validTeachers.length === 0) {
-      // Fallback: ถ้าไม่มีระบุ ให้หาจาก Teacher ที่ชื่อตรงกับ field ใน Subject หรือ Assign Auto (ข้ามไปก่อน)
-      console.warn(`No teacher for ${task.id}`);
+      console.warn(`   ⚠️ No teacher assigned - skipping`);
+      failedTasks.push({
+        taskId: task.taskId,
+        subject_id: task.id,
+        subject_name: task.subject_name,
+        type: task.type,
+        reason: "ไม่มีครูสอนวิชานี้ในระบบ (No Teacher Assigned in DB)"
+      });
+      currentTaskIndex++;
+      continue;
+    }
+    console.log(`   👨‍🏫 Teachers: ${validTeachers.join(', ')}`);
+
+    // Find how many consecutive tasks of the same subject+type THAT STILL NEED TO BE SCHEDULED
+    let consecutiveCount = 0;
+    const remainingToSchedule = expectedForThisType - alreadyScheduled;
+    
+    for (let i = currentTaskIndex; i < tasks.length && consecutiveCount < remainingToSchedule; i++) {
+      if (tasks[i].id === task.id && tasks[i].type === task.type) {
+        consecutiveCount++;
+      } else {
+        break;
+      }
+    }
+    
+    console.log(`   📚 Need to schedule: ${consecutiveCount} more periods (${alreadyScheduled}/${expectedForThisType} already done)`);
+    
+    if (consecutiveCount === 0) {
+      console.log(`   ✅ All periods for ${task.subject_name} (${taskType}) already scheduled`);
+      currentTaskIndex++;
       continue;
     }
 
@@ -665,114 +987,573 @@ async function generateScheduleLogic(params: {
     const taskNameLower = task.subject_name?.toLowerCase() || "";
 
     if (taskIdLower.includes("iot") || taskNameLower.includes("iot")) {
-      const iotRoom = rooms.find((r: any) => r.room_id === "R6201" || r.name === "IoT Lab");
-      validRooms = iotRoom ? [iotRoom] : rooms;
+      const iotRoom = rooms.find((r: any) => {
+        const roomId = r.room_id || r._id;
+        return roomId === "R6201" || 
+               r.room_name?.toLowerCase().includes("iot") ||
+               r.room_name === "IoT Lab";
+      });
+      if (!iotRoom) {
+        console.warn(`   ⚠️ IoT room (R6201) not found`);
+        failedTasks.push({
+          taskId: task.taskId,
+          subject_id: task.id,
+          subject_name: task.subject_name,
+          reason: "IoT Lab (R6201) not available"
+        });
+        continue;
+      }
+      validRooms = [iotRoom];
     } else {
       // Filter by Type
-      // Constraint 9: Theory -> Theory Room, Practice -> Practice Room
+      // Constraint 9: Theory -> Theory Room, Practice -> Practice/Lab Room
       validRooms = rooms.filter((r: any) => {
-        if (task.reqLab) return r.room_type === "Practice" || r.room_type === "Lab";
-        return r.room_type !== "Practice" && r.room_type !== "Lab"; // Theory
+        const roomTypeRaw = r.room_type || "";
+        const roomType = String(roomTypeRaw).toLowerCase();
+
+        // ห้องปฏิบัติ/แล็บ: มีคำว่า lab, แล็บ หรือ ปฏิบัติ
+        const isLabRoom = roomType.includes("lab") || roomType.includes("แล็บ") || roomType.includes("ปฏิบัติ");
+
+        if (task.reqLab) {
+          // ต้องเป็นห้องปฏิบัติ/แล็บ เท่านั้น
+          return isLabRoom;
+        }
+        // ทฤษฎี: หลีกเลี่ยงห้องแล็บ
+        return !isLabRoom;
       });
+
+      // Constraint 13: General subjects prefer larger rooms (for multi-group classes)
+      if (task.isGeneral && validRooms.length > 1) {
+        // Prefer rooms with larger capacity (if available in room data)
+        // For now, just ensure we have theory rooms available
+        validRooms = validRooms.filter((r: any) => {
+          const roomType = r.room_type || "";
+          return roomType !== "Practice" && roomType !== "Lab";
+        });
+      }
     }
 
-    const year = task.recommendedYear || 1; // สมมติปี 1 ถ้าไม่มี
+    if (validRooms.length === 0) {
+      console.warn(`   ⚠️ No valid rooms for ${task.type} type`);
+      console.warn(`   Required: ${task.reqLab ? 'Practice/Lab' : 'Theory'} rooms`);
+      console.warn(`   Available rooms: ${rooms.map(r => `${r.room_id}(${r.room_type})`).join(', ')}`);
+      failedTasks.push({
+        taskId: task.taskId,
+        subject_id: task.id,
+        subject_name: task.subject_name,
+        reason: `No ${task.reqLab ? 'Practice/Lab' : 'Theory'} rooms available (found ${rooms.length} total rooms)`
+      });
+      continue;
+    }
+    console.log(`   🏫 Valid rooms: ${validRooms.length} (${validRooms.map(r => (r.room_id || r._id)).join(', ')})`);
 
-    // Try to slot in
-    for (const day of days) {
+    const year = task.recommendedYear || 1;
+
+    // Try twice: first without late theory, then allow late theory if needed
+    const attempts = [
+      { allowLateTheory: false, description: "normal" },
+      { allowLateTheory: true, description: "with late theory allowed" }
+    ];
+
+    for (const attempt of attempts) {
       if (assigned) break;
 
-      for (let period = 1; period <= maxPeriods; period++) {
-        if (assigned) break;
+      // Strategy 1: Try to schedule ALL periods consecutively first (PREFERRED)
+      if (consecutiveCount > 1) {
+        console.log(`   🎯 Strategy 1: Try consecutive scheduling (${consecutiveCount} periods)`);
+        
+        // ⚠️ LOAD BALANCING: Sort days by current load (fewer periods = higher priority)
+        const daysByLoad = [...days].sort((a, b) => {
+          const countA = getDayPeriodCount(a);
+          const countB = getDayPeriodCount(b);
+          return countA - countB; // Days with fewer periods first
+        });
+        
+        for (const day of daysByLoad) {
+          if (assigned) break;
+          
+          for (let startPeriod = 1; startPeriod <= maxPeriods - consecutiveCount + 1; startPeriod++) {
+            if (assigned) break;
+            if (!isSlotAvailable(day, startPeriod, task, attempt.allowLateTheory)) continue;
+            
+            // Try each teacher
+            for (const tid of validTeachers) {
+              if (assigned) break;
+              
+              // Find rooms available for all consecutive periods
+              const availableRooms = validRooms.filter((room: any) => {
+                const roomId = room.room_id || room._id;
+                return findConsecutiveSlots(day, startPeriod, consecutiveCount, task, tid, roomId, attempt.allowLateTheory, year);
+              });
+              
+              if (availableRooms.length > 0) {
+                // Sort by usage and pick least used
+                availableRooms.sort((a: any, b: any) => {
+                  const aId = a.room_id || a._id;
+                  const bId = b.room_id || b._id;
+                  return (roomUsage.get(aId) || 0) - (roomUsage.get(bId) || 0);
+                });
+                const pickedRoom = availableRooms[0];
+                const pickedRoomId = pickedRoom.room_id || pickedRoom._id;
+                const tObj = teachers.find((t: any) => 
+                  t.teacher_id === tid || t.id === tid || t._id === tid
+                );
+                
+                // Assign all consecutive periods
+                for (let i = 0; i < consecutiveCount; i++) {
+                  const period = startPeriod + i;
+                  markBusy(tid, pickedRoomId, year, day, period);
+                  
+                  const ts = timeslots.find((t: any) => t.period === period);
+                  const timeStr = ts ? `${ts.start}-${ts.end}` : `Period ${period}`;
+                  
+                  schedule.push({
+                    subject: task.id,
+                    subjectName: task.subject_name,
+                    teacher: tObj ? tObj.teacher_name : tid,
+                    room: pickedRoom.room_name || pickedRoomId,
+                    day: day,
+                    period: period,
+                    slotNo: period,
+                    time: timeStr,
+                    type: task.type
+                  });
+                  
+                  roomUsage.set(pickedRoomId, (roomUsage.get(pickedRoomId) || 0) + 1);
+                  incrementScheduledCount(task.id, task.type); // Track scheduled periods
+                }
+                
+                assigned = true;
+                console.log(`   ✅ Assigned CONSECUTIVE: ${day} P${startPeriod}-${startPeriod + consecutiveCount - 1} (${consecutiveCount} periods) - ${tObj?.teacher_name || tid} @ ${pickedRoom.room_name || pickedRoomId}`);
+                currentTaskIndex += consecutiveCount; // Skip all assigned tasks
+                break;
+              }
+            }
+          }
+        }
+        
+        // Strategy 2: If consecutive failed, try PARTIAL consecutive (e.g., 2+2 for 4 periods)
+        if (!assigned && consecutiveCount >= 3) {
+          console.log(`   🎯 Strategy 2: Try partial consecutive scheduling (split into smaller blocks)`);
+          
+          // Try to split into blocks of 2-3 periods
+          const blockSizes = consecutiveCount === 4 ? [2, 2] : 
+                             consecutiveCount === 5 ? [3, 2] : 
+                             consecutiveCount === 6 ? [3, 3] : 
+                             [2, 2]; // default
+          
+          let blockIndex = 0;
+          let remainingToSchedule = consecutiveCount;
+          let tempScheduled = 0;
+          
+          for (const blockSize of blockSizes) {
+            if (remainingToSchedule === 0) break;
+            const currentBlockSize = Math.min(blockSize, remainingToSchedule);
+            
+            // ⚠️ LOAD BALANCING: Sort days by current load for each block
+            const daysByLoad = [...days].sort((a, b) => {
+              const countA = getDayPeriodCount(a);
+              const countB = getDayPeriodCount(b);
+              return countA - countB; // Days with fewer periods first
+            });
+            
+            // Try to find consecutive slots for this block
+            let blockAssigned = false;
+            for (const day of daysByLoad) {
+              if (blockAssigned) break;
+              
+              for (let startPeriod = 1; startPeriod <= maxPeriods - currentBlockSize + 1; startPeriod++) {
+                if (blockAssigned) break;
+                if (!isSlotAvailable(day, startPeriod, task, attempt.allowLateTheory)) continue;
+                
+                for (const tid of validTeachers) {
+                  if (blockAssigned) break;
+                  
+                  const availableRooms = validRooms.filter((room: any) => {
+                    const roomId = room.room_id || room._id;
+                    return findConsecutiveSlots(day, startPeriod, currentBlockSize, task, tid, roomId, attempt.allowLateTheory, year);
+                  });
+                  
+                  if (availableRooms.length > 0) {
+                    availableRooms.sort((a: any, b: any) => {
+                      const aId = a.room_id || a._id;
+                      const bId = b.room_id || b._id;
+                      return (roomUsage.get(aId) || 0) - (roomUsage.get(bId) || 0);
+                    });
+                    const pickedRoom = availableRooms[0];
+                    const pickedRoomId = pickedRoom.room_id || pickedRoom._id;
+                    const tObj = teachers.find((t: any) => 
+                      t.teacher_id === tid || t.id === tid || t._id === tid
+                    );
+                    
+                    for (let i = 0; i < currentBlockSize; i++) {
+                      const period = startPeriod + i;
+                      markBusy(tid, pickedRoomId, year, day, period);
+                      
+                      const ts = timeslots.find((t: any) => t.period === period);
+                      const timeStr = ts ? `${ts.start}-${ts.end}` : `Period ${period}`;
+                      
+                      schedule.push({
+                        subject: task.id,
+                        subjectName: task.subject_name,
+                        teacher: tObj ? tObj.teacher_name : tid,
+                        room: pickedRoom.room_name || pickedRoomId,
+                        day: day,
+                        period: period,
+                        slotNo: period,
+                        time: timeStr,
+                        type: task.type
+                      });
+                      
+                      roomUsage.set(pickedRoomId, (roomUsage.get(pickedRoomId) || 0) + 1);
+                      incrementScheduledCount(task.id, task.type);
+                    }
+                    
+                    blockAssigned = true;
+                    tempScheduled += currentBlockSize;
+                    remainingToSchedule -= currentBlockSize;
+                    console.log(`   ✅ Assigned BLOCK ${blockIndex + 1}: ${day} P${startPeriod}-${startPeriod + currentBlockSize - 1} (${currentBlockSize}/${consecutiveCount} periods)`);
+                    break;
+                  }
+                }
+              }
+            }
+            
+            if (!blockAssigned) {
+              console.log(`   ⚠️ Could not find slot for block ${blockIndex + 1} (size ${currentBlockSize})`);
+              break;
+            }
+            blockIndex++;
+          }
+          
+          if (tempScheduled === consecutiveCount) {
+            assigned = true;
+            currentTaskIndex += consecutiveCount;
+            console.log(`   ✅ Successfully scheduled all ${consecutiveCount} periods in ${blockIndex} blocks`);
+          } else if (tempScheduled > 0) {
+            // Partial success - mark remaining as failed
+            const remaining = consecutiveCount - tempScheduled;
+            console.warn(`   ⚠️ Only scheduled ${tempScheduled}/${consecutiveCount} periods. ${remaining} periods failed.`);
+            for (let i = tempScheduled; i < consecutiveCount; i++) {
+              const remainingTask = tasks[currentTaskIndex + i];
+              if (remainingTask) {
+                failedTasks.push({
+                  taskId: remainingTask.taskId,
+                  subject_id: remainingTask.id,
+                  subject_name: remainingTask.subject_name,
+                  type: remainingTask.type,
+                  reason: `จัดได้เพียง ${tempScheduled}/${consecutiveCount} คาบ (แบ่งเป็น ${blockIndex} กลุ่ม)`
+                });
+              }
+            }
+            assigned = true;
+            currentTaskIndex += consecutiveCount;
+          }
+        }
+      }
+      
+      // Strategy 3: If still not assigned, try individual slots (FALLBACK)
+      // IMPORTANT: Must schedule ALL consecutive tasks, not just one!
+      if (!assigned) {
+        console.log(`   🎯 Strategy 3: Try individual slot scheduling (need ${consecutiveCount} periods)`);
+        
+        // Try to schedule all consecutive tasks individually
+        let scheduledCount = 0;
+        let tempTaskIndex = currentTaskIndex;
+        
+        // Try to schedule each task in the consecutive group
+        for (let taskOffset = 0; taskOffset < consecutiveCount; taskOffset++) {
+          const currentTaskToSchedule = tasks[tempTaskIndex + taskOffset];
+          if (!currentTaskToSchedule) break;
+          
+          // Create list of all possible slots sorted by preference WITH LOAD BALANCING
+          const slotCandidates: Array<{day: string, period: number, priority: number}> = [];
+          
+          for (const day of days) {
+            const currentDayLoad = getDayPeriodCount(day);
+            
+            for (let period = 1; period <= maxPeriods; period++) {
+              if (isSlotAvailable(day, period, currentTaskToSchedule, attempt.allowLateTheory)) {
+                // ⚠️ LOAD BALANCING: Priority based on day load + period preference
+                let priority = currentDayLoad * 100; // Lower day load = higher priority
+                
+                if (currentTaskToSchedule.type === "Lecture") {
+                  priority += period; // Prefer earlier periods for theory
+                } else {
+                  priority += (100 - period); // Practice can be later
+                }
+                slotCandidates.push({ day, period, priority });
+              }
+            }
+          }
 
-        // Skip Constraints Time
-        // Constraint 2: คาบ 5 พัก
-        if (period === 5) continue;
+          // Sort by priority (lower = better, because we add day load which should be minimized)
+          slotCandidates.sort((a, b) => a.priority - b.priority);
 
-        // Constraint 12: พุธ คาบ 8-9 กิจกรรม
-        if (day === "Wed" && (period === 8 || period === 9)) continue;
+          // Try each slot candidate for this task
+          let taskAssigned = false;
+          for (const slot of slotCandidates) {
+            if (taskAssigned) break;
 
-        // Constraint 15: หลีกเลี่ยง Theory หลัง 17:00 (คาบ 9+)
-        if (task.type === "Lecture" && period >= 9) continue;
+            // Try each teacher
+            for (const tid of validTeachers) {
+              if (taskAssigned) break;
 
-        // Constraint 11: Homeroom (สมมติ ศุกร์ คาบ 8)
-        if (day === "Fri" && period === 8) continue;
+              // Check if teacher is free
+              if (!isFree(tid, "ANY", year, slot.day, slot.period)) {
+                continue;
+              }
 
-        // Find valid Teacher & Room
-        let pickedTeacher = null;
-        let pickedRoom = null;
+              // Find available rooms for this teacher
+              const availableRooms = validRooms.filter((room: any) => {
+                const roomId = room.room_id || room._id;
+                return isFree(tid, roomId, year, slot.day, slot.period);
+              });
 
-        for (const tid of validTeachers) {
-          if (isFree(tid, "ANY", "ANY", day, period)) { // เช็คครูว่าง (Room/Group ไม่ต้องเช็คที่นี่)
-            pickedTeacher = tid;
+              if (availableRooms.length > 0) {
+                // Sort by usage count (ascending) and pick the least used
+                availableRooms.sort((a: any, b: any) => {
+                  const aId = a.room_id || a._id;
+                  const bId = b.room_id || b._id;
+                  return (roomUsage.get(aId) || 0) - (roomUsage.get(bId) || 0);
+                });
+                const pickedRoom = availableRooms[0];
+                const pickedRoomId = pickedRoom.room_id || pickedRoom._id;
+
+                // Assign!
+                markBusy(tid, pickedRoomId, year, slot.day, slot.period);
+
+                // หา Teacher Name/Room Name
+                const tObj = teachers.find((t: any) => 
+                  t.teacher_id === tid || t.id === tid || t._id === tid
+                );
+
+                // Map period to Time
+                const ts = timeslots.find((t: any) => t.period === slot.period);
+                const timeStr = ts ? `${ts.start}-${ts.end}` : `Period ${slot.period}`;
+
+                schedule.push({
+                  subject: currentTaskToSchedule.id,
+                  subjectName: currentTaskToSchedule.subject_name,
+                  teacher: tObj ? tObj.teacher_name : tid,
+                  room: pickedRoom.room_name || pickedRoomId,
+                  day: slot.day,
+                  period: slot.period,
+                  slotNo: slot.period,
+                  time: timeStr,
+                  type: currentTaskToSchedule.type
+                });
+
+                // Increment usage count
+                roomUsage.set(pickedRoomId, (roomUsage.get(pickedRoomId) || 0) + 1);
+                incrementScheduledCount(currentTaskToSchedule.id, currentTaskToSchedule.type); // Track scheduled periods
+                taskAssigned = true;
+                scheduledCount++;
+                console.log(`   ✅ Assigned [${taskOffset + 1}/${consecutiveCount}]: ${slot.day} P${slot.period} (${timeStr}) - ${tObj?.teacher_name || tid} @ ${pickedRoom.room_name || pickedRoomId}`);
+                if (attempt.allowLateTheory && currentTaskToSchedule.type === "Lecture") {
+                  console.log(`      ⚠️ Theory class scheduled after 17:00 due to constraints`);
+                }
+                break;
+              }
+            }
+          }
+          
+          // If this task couldn't be scheduled, break and mark as failed
+          if (!taskAssigned) {
+            console.log(`   ⚠️ Could not schedule task ${taskOffset + 1}/${consecutiveCount} individually`);
             break;
           }
         }
-
-        if (!pickedTeacher) continue; // ครูไม่ว่างสักคนในคาบนี้
-
-        // 🔧 FIX: Pick LEAST-USED room from validRooms to distribute fairly
-        const availableRooms = validRooms.filter((room: any) =>
-          isFree(pickedTeacher, room.room_id, year, day, period)
-        );
-
-        if (availableRooms.length > 0) {
-          // Sort by usage count (ascending) and pick the least used
-          availableRooms.sort((a: any, b: any) =>
-            (roomUsage.get(a.room_id) || 0) - (roomUsage.get(b.room_id) || 0)
-          );
-          pickedRoom = availableRooms[0];
-
-          // Increment usage count
-          roomUsage.set(pickedRoom.room_id, (roomUsage.get(pickedRoom.room_id) || 0) + 1);
-        }
-
-        if (pickedTeacher && pickedRoom) {
-          // Assign!
-          markBusy(pickedTeacher, pickedRoom.room_id, year, day, period);
-
-          // หา Teacher Name/Room Name
-          const tObj = teachers.find((t: any) => t.id === pickedTeacher || t.teacher_id === pickedTeacher);
-
-          // Map period to Time
-          // สมมติ Period 1 = 08:00 (ตาม Timeslot DB หรือ Config)
-          const ts = timeslots.find((t: any) => t.period === period);
-          const timeStr = ts ? `${ts.start}-${ts.end}` : `Period ${period}`;
-
-          schedule.push({
-            subject: task.id,
-            subjectName: task.subject_name,
-            teacher: tObj ? tObj.teacher_name : pickedTeacher,
-            room: pickedRoom.room_name || pickedRoom.room_id,
-            day: day,
-            period: period, // เก็บ period ไว้ sort
-            slotNo: period, // use slotNo for frontend compatibility
-            time: timeStr,
-            type: task.type
-          });
+        
+        // If we scheduled at least one task, mark remaining as failed and skip all consecutive tasks
+        if (scheduledCount > 0) {
           assigned = true;
+          
+          // Mark remaining unscheduled tasks as failed
+          if (scheduledCount < consecutiveCount) {
+            const remaining = consecutiveCount - scheduledCount;
+            console.warn(`   ⚠️ Only scheduled ${scheduledCount}/${consecutiveCount} tasks. Marking ${remaining} remaining as failed.`);
+            
+            for (let i = scheduledCount; i < consecutiveCount; i++) {
+              const remainingTask = tasks[currentTaskIndex + i];
+              if (remainingTask) {
+                failedTasks.push({
+                  taskId: remainingTask.taskId,
+                  subject_id: remainingTask.id,
+                  subject_name: remainingTask.subject_name,
+                  type: remainingTask.type,
+                  reason: `จัดได้เพียง ${scheduledCount}/${consecutiveCount} คาบ (${remaining} คาบที่เหลือจัดไม่ได้)`
+                });
+              }
+            }
+          }
+          
+          currentTaskIndex += consecutiveCount; // Skip all tasks in the group
+          console.log(`   📊 Scheduled ${scheduledCount}/${consecutiveCount} tasks individually`);
         }
       }
     }
 
     if (!assigned) {
-      console.warn(`Could not assign task: ${task.subject_name}`);
+      // CRITICAL: If we have consecutive tasks, mark ALL of them as failed, not just one
+      // Otherwise they will be processed again and scheduled multiple times!
+      for (let i = 0; i < consecutiveCount; i++) {
+        const failedTask = tasks[currentTaskIndex + i];
+        if (!failedTask) break;
+        
+        // Generate detailed failure reason
+        let failureReason = "";
+        const reasons: string[] = [];
+        
+        // Check room availability
+        if (validRooms.length === 0) {
+          reasons.push(`ไม่มีห้อง${failedTask.reqLab ? 'ปฏิบัติ/แล็บ' : 'ทฤษฎี'}ที่เหมาะสม`);
+        }
+        
+        // Check teacher availability
+        let teacherBusyCount = 0;
+        for (const tid of validTeachers) {
+          let teacherFreeSlots = 0;
+          for (const day of days) {
+            for (let period = 1; period <= maxPeriods; period++) {
+              if (isSlotAvailable(day, period, failedTask, false) && isFree(tid, "ANY", year, day, period)) {
+                teacherFreeSlots++;
+              }
+            }
+          }
+          if (teacherFreeSlots === 0) teacherBusyCount++;
+        }
+        
+        if (teacherBusyCount === validTeachers.length) {
+          reasons.push(`ครูทั้งหมดไม่ว่าง (${validTeachers.join(', ')})`);
+        } else if (teacherBusyCount > 0) {
+          reasons.push(`ครูบางคนไม่ว่าง (${teacherBusyCount}/${validTeachers.length})`);
+        }
+        
+        // Check day capacity
+        const fullDays = days.filter(day => getDayPeriodCount(day) >= 10);
+        if (fullDays.length === days.length) {
+          reasons.push(`ทุกวันเต็มแล้ว (10 คาบ/วัน)`);
+        } else if (fullDays.length > 0) {
+          reasons.push(`บางวันเต็มแล้ว: ${fullDays.join(', ')}`);
+        }
+        
+        // Check slot availability
+        let availableSlots = 0;
+        for (const day of days) {
+          for (let period = 1; period <= maxPeriods; period++) {
+            if (isSlotAvailable(day, period, failedTask, false)) {
+              availableSlots++;
+            }
+          }
+        }
+        
+        if (availableSlots === 0) {
+          reasons.push(`ไม่มีช่องว่างที่เหมาะสม (ถูกบล็อกโดยข้อจำกัด)`);
+        } else {
+          reasons.push(`มีช่องว่าง ${availableSlots} ช่อง แต่ครู/ห้องไม่ว่าง`);
+        }
+        
+        failureReason = reasons.length > 0 
+          ? reasons.join('; ') 
+          : `ไม่สามารถจัดได้ (สาเหตุไม่ชัดเจน)`;
+        
+        // Only log once for the group, not for each task
+        if (i === 0) {
+          console.warn(`   ❌ FAILED: Could not assign ${failedTask.subject_name} (${failedTask.type}) - ${consecutiveCount} periods`);
+          console.warn(`      Reason: ${failureReason}`);
+          
+          // Debug info
+          const dayCounts = days.map(day => ({
+            day,
+            count: getDayPeriodCount(day),
+            max: 10
+          }));
+          console.warn(`      Current day distribution:`, dayCounts);
+        }
+        
+        failedTasks.push({
+          taskId: failedTask.taskId,
+          subject_id: failedTask.id,
+          subject_name: failedTask.subject_name,
+          type: failedTask.type,
+          reason: i === 0 ? failureReason : `ส่วนหนึ่งของกลุ่มที่จัดไม่ได้ (${consecutiveCount} คาบ)`
+        });
+      }
+      
+      // CRITICAL: Skip ALL consecutive tasks, not just one!
+      currentTaskIndex += consecutiveCount;
     }
   }
 
-  // 6. Validate Schedule Against Constraints
+  // Final validation: Check if any subject has more periods than expected
+  console.log(`\n📊 Schedule Generation Complete:`);
+  const subjectSchedule = schedule.filter(s => s.type !== "Activity" && s.type !== "Meeting" && s.subject !== "HOME ROOM");
+  console.log(`   ✅ Scheduled: ${subjectSchedule.length} periods`);
+  console.log(`   ❌ Failed: ${failedTasks.length} tasks`);
+  console.log(`   📈 Success rate: ${((tasks.length - failedTasks.length) / tasks.length * 100).toFixed(1)}%`);
+  
+  // ⚠️ LOAD BALANCING SUMMARY
+  console.log(`\n📅 Load Balancing Summary:`);
+  const dayDistribution = days.map(day => {
+    const count = schedule.filter(s => 
+      s.day === day && 
+      s.type !== "Activity" && 
+      s.type !== "Meeting" &&
+      s.subject !== "HOME ROOM"
+    ).length;
+    return { day, count };
+  });
+  
+  dayDistribution.forEach(({ day, count }) => {
+    const bar = '█'.repeat(count);
+    const status = count >= 6 && count <= 7 ? '✅' : count < 6 ? '⚠️ ' : '⚠️ ';
+    console.log(`   ${status} ${day}: ${count} periods ${bar}`);
+  });
+  
+  const avgPerDay = (subjectSchedule.length / days.length).toFixed(1);
+  const minDay = Math.min(...dayDistribution.map(d => d.count));
+  const maxDay = Math.max(...dayDistribution.map(d => d.count));
+  console.log(`   📊 Average: ${avgPerDay} periods/day`);
+  console.log(`   📉 Min: ${minDay} periods, Max: ${maxDay} periods`);
+  console.log(`   📏 Balance range: ${maxDay - minDay} periods difference\n`);
+
+  // Validate: Check for duplicate/over-scheduled subjects
+  const subjectPeriodCounts = new Map<string, number>();
+  subjectSchedule.forEach((entry: any) => {
+    const key = entry.subject;
+    subjectPeriodCounts.set(key, (subjectPeriodCounts.get(key) || 0) + 1);
+  });
+
+  const overScheduledSubjects: string[] = [];
+  subjects.forEach((subj: any) => {
+    const sId = subj.subject_id || subj.id || subj._id;
+    const expected = (subj.theory || 0) + (subj.practice || 0);
+    const actual = subjectPeriodCounts.get(String(sId)) || 0;
+    if (actual > expected) {
+      overScheduledSubjects.push(`${subj.subject_name} (${sId}): ${actual} periods (expected ${expected})`);
+      console.warn(`   ⚠️ OVER-SCHEDULED: ${subj.subject_name} has ${actual} periods but should have ${expected}`);
+    }
+  });
+
+  if (overScheduledSubjects.length > 0) {
+    console.error(`\n❌ CRITICAL: Found ${overScheduledSubjects.length} subjects with MORE periods than expected:`);
+    overScheduledSubjects.forEach(msg => console.error(`   ${msg}`));
+  }
+
+  // 6. Validate Schedule
   const validation = validateScheduleConstraints(schedule, teachers, subjects, rooms, timeslots);
 
-  // 7. Log room usage for debugging
+  // 7. Log room usage
   console.log("📊 Room Usage Distribution:");
   roomUsage.forEach((count, roomId) => {
     if (count > 0) console.log(`   ${roomId}: ${count} times`);
   });
 
-  // 8. Return Schedule Data (not NextResponse)
   return {
     schedule,
     validation,
+    failedTasks, // Return failures
     stats: {
       totalEntries: schedule.length,
       subjects: [...new Set(schedule.map((s: { subject: string }) => s.subject))].length,

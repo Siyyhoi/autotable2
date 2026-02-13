@@ -3,188 +3,226 @@
 import { Calendar, User, MapPin } from "lucide-react";
 
 interface Slot {
-    id: number;
-    label: string;
-    startTime: string;
-    endTime: string;
+  id: number;
+  label: string;
+  startTime: string;
+  endTime: string;
 }
 
 interface ScheduleItem {
-    day: string;
-    period: number;
-    subject: string;
-    subjectName: string;
-    teacher: string;
-    room: string;
-    type?: string; // "Lecture", "Practice", "Activity", "Meeting"
+  day: string;
+  period: number;
+  subject: string;
+  subjectName: string;
+  teacher: string;
+  room: string;
+  type?: string;
 }
 
 interface Props {
-    schedule: ScheduleItem[];
-    slots: Slot[];
-    isLoadingData: boolean;
-    groupName?: string;
-    advisor?: string;
+  schedule: ScheduleItem[];
+  slots: Slot[];
+  isLoadingData: boolean;
+  groupName?: string;
+  advisor?: string;
+  failedTasks?: { subject_name: string; reason: string }[];
 }
 
 export default function MasterScheduleTable({
-    schedule,
-    slots,
-    isLoadingData,
-    groupName,
-    advisor,
+  schedule,
+  slots,
+  isLoadingData,
+  groupName,
+  advisor,
+  failedTasks,
 }: Props) {
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 
-    const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  const formatTime = (timeStr: string) => {
+    if (!timeStr) return "";
+    if (/^\d{1,2}:\d{2}$/.test(timeStr)) return timeStr;
+    try {
+      const date = new Date(timeStr);
+      if (isNaN(date.getTime())) return timeStr;
+      return date.toLocaleTimeString("th-TH", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    } catch (e) {
+      return timeStr;
+    }
+  };
 
-    // Helper to format time (ISO string or HH:mm) -> HH:mm
-    const formatTime = (timeStr: string) => {
-        if (!timeStr) return "";
-        // If it's already HH:mm or H:mm
-        if (/^\d{1,2}:\d{2}$/.test(timeStr)) return timeStr;
+  const getSubject = (day: string, period: number) => {
+    return schedule.find((s) => s.day === day && s.period === period);
+  };
 
-        try {
-            const date = new Date(timeStr);
-            if (isNaN(date.getTime())) return timeStr; // Fallback
-
-            // Format to HH:mm (Thai locale usually works, or force 24h)
-            return date.toLocaleTimeString('th-TH', {
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false
-            });
-        } catch (e) {
-            return timeStr;
-        }
-    };
-
+  const isSameSubject = (s1: ScheduleItem, s2: ScheduleItem | undefined) => {
+    if (!s2) return false;
     return (
-        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-blue-50/30 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <Calendar className="w-5 h-5 text-indigo-500" />
-                    <div>
-                        <h2 className="font-semibold text-gray-700">
-                            {groupName || "ตารางเรียนรวม (Master Schedule)"}
-                        </h2>
-                        {advisor && (
-                            <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                                <User className="w-3 h-3" />
-                                ครูที่ปรึกษา: {advisor}
-                            </p>
-                        )}
-                    </div>
-                </div>
-
-                {schedule.length > 0 && (
-                    <span className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full font-medium">
-                        {schedule.length} คาบเรียน
-                    </span>
-                )}
-            </div>
-
-            <div className="overflow-x-auto pb-4">
-                <table className="w-full min-w-[1000px] border-collapse">
-                    <thead>
-                        <tr className="bg-gradient-to-r from-gray-100 to-blue-50 text-gray-600 text-sm uppercase tracking-wider">
-                            <th className="p-4 w-24 text-center border-r border-gray-200 bg-gray-200/70 sticky left-0 z-10">
-                                Day
-                            </th>
-
-                            {slots.map((slot) => (
-                                <th
-                                    key={slot.id}
-                                    className="p-3 text-center border-r border-gray-200 last:border-0 min-w-[140px]"
-                                >
-                                    <div className="font-bold text-gray-800">{slot.label}</div>
-                                    <div className="text-[10px] text-gray-500 font-normal mt-0.5 bg-white/50 px-2 py-0.5 rounded-full inline-block">
-                                        {formatTime(slot.startTime)} - {formatTime(slot.endTime)}
-                                    </div>
-                                </th>
-                            ))}
-
-                            {slots.length === 0 && !isLoadingData && (
-                                <th className="p-4 text-center text-red-400 font-normal">
-                                    ยังไม่ได้ตั้งค่าเวลาเรียน
-                                </th>
-                            )}
-                        </tr>
-                    </thead>
-
-                    <tbody className="divide-y divide-gray-100">
-                        {days.map((day) => (
-                            <tr key={day} className="hover:bg-blue-50/30 transition-colors">
-                                <td className="p-4 font-bold text-center text-gray-700 border-r border-gray-200 bg-gray-50 sticky left-0 z-10 shadow-sm">
-                                    {day}
-                                </td>
-
-                                {slots.map((slot) => {
-                                    const subject = schedule.find(
-                                        (s) => s.day === day && s.period === slot.id
-                                    );
-
-                                    return (
-                                        <td
-                                            key={slot.id}
-                                            className="p-2 border-r border-gray-200 last:border-0 align-top h-32"
-                                        >
-                                            {subject ? (
-                                                <div className={`border-2 p-3 rounded-xl h-full flex flex-col justify-between hover:shadow-lg hover:scale-[1.02] transition-all ${subject.type === "Activity"
-                                                    ? "bg-gradient-to-br from-green-50 to-emerald-50 border-green-300"
-                                                    : subject.type === "Meeting"
-                                                        ? "bg-gradient-to-br from-orange-50 to-amber-50 border-orange-300"
-                                                        : "bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-200"
-                                                    }`}>
-                                                    <div>
-                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded mb-1 inline-block ${subject.type === "Activity"
-                                                            ? "text-green-700 bg-green-100"
-                                                            : subject.type === "Meeting"
-                                                                ? "text-orange-700 bg-orange-100"
-                                                                : "text-indigo-600 bg-indigo-100"
-                                                            }`}>
-                                                            {subject.subject}
-                                                        </span>
-
-                                                        <h3 className="text-xs font-semibold text-gray-900 leading-tight line-clamp-2">
-                                                            {subject.subjectName}
-                                                        </h3>
-                                                    </div>
-
-                                                    <div className="space-y-1 mt-2">
-                                                        <div className="flex items-center gap-1.5 text-[10px] text-gray-600">
-                                                            <User className={`w-3 h-3 ${subject.type === "Activity" ? "text-green-400" :
-                                                                subject.type === "Meeting" ? "text-orange-400" :
-                                                                    "text-indigo-400"
-                                                                }`} />
-                                                            <span className="truncate max-w-[80px]">
-                                                                {subject.teacher}
-                                                            </span>
-                                                        </div>
-
-                                                        <div className="flex items-center gap-1.5 text-[10px] text-gray-600">
-                                                            <MapPin className={`w-3 h-3 ${subject.type === "Activity" ? "text-green-400" :
-                                                                subject.type === "Meeting" ? "text-orange-400" :
-                                                                    "text-indigo-400"
-                                                                }`} />
-                                                            <span>{subject.room}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className="h-full flex items-center justify-center border-2 border-dashed border-transparent hover:border-gray-200 rounded-lg transition-colors">
-                                                    <span className="text-gray-200 text-xl font-light select-none">
-                                                        -
-                                                    </span>
-                                                </div>
-                                            )}
-                                        </td>
-                                    );
-                                })}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        </div>
+      s1.subject === s2.subject &&
+      s1.teacher === s2.teacher &&
+      s1.room === s2.room
     );
+  };
+
+  const renderRowCells = (day: string) => {
+    const cells = [];
+    let i = 0;
+
+    while (i < slots.length) {
+      const currentSlot = slots[i];
+      const subject = getSubject(day, currentSlot.id);
+
+      if (!subject) {
+        cells.push(
+          <td
+            key={`${day}-${currentSlot.id}`}
+            className="border border-gray-300 p-2 h-24 align-middle text-center bg-white hover:bg-gray-50 transition-colors"
+          >
+          </td>
+        );
+        i++;
+      } else {
+        let duration = 1;
+        for (let j = i + 1; j < slots.length; j++) {
+          const nextSlot = slots[j];
+          const nextSubject = getSubject(day, nextSlot.id);
+          if (isSameSubject(subject, nextSubject)) {
+            duration++;
+          } else {
+            break;
+          }
+        }
+
+        // เช็คประเภทเพื่อเลือกสีและข้อความของป้าย Tag
+        const isActivity = subject.type === "Activity";
+        const isMeeting = subject.type === "Meeting";
+        const showTag = isActivity || isMeeting; // แสดงเฉพาะถ้าเป็น กิจกรรม หรือ ประชุม
+
+        cells.push(
+          <td
+            key={`${day}-${currentSlot.id}`}
+            colSpan={duration}
+            className="border border-gray-300 p-0 h-24 align-middle relative group bg-white hover:bg-gray-50 transition-colors"
+          >
+            <div className="w-full h-full flex flex-col justify-between p-2 text-center relative">
+              
+              {/* ป้าย Tag (แสดงเฉพาะ Activity หรือ Meeting) */}
+              {showTag && (
+                <div
+                  className={`absolute top-0 right-0 px-2 py-0.5 text-[10px] font-bold text-white rounded-bl-md shadow-sm z-10
+                  ${isActivity ? "bg-green-500" : "bg-orange-500"}`}
+                >
+                  {isActivity ? "กิจกรรม" : "ประชุม"}
+                </div>
+              )}
+
+              {/* รหัสวิชา */}
+              <div className="text-xs font-bold text-black mb-1 mt-1">
+                {subject.subject}
+              </div>
+
+              {/* ชื่อวิชา */}
+              <div className="text-sm text-gray-800 font-medium leading-tight line-clamp-2 px-1">
+                {subject.subjectName}
+              </div>
+
+              {/* ครูและห้อง */}
+              <div className="mt-auto flex items-center justify-between w-full text-[10px] text-gray-600 border-t border-gray-100 pt-1.5">
+                <div className="flex items-center gap-1 overflow-hidden">
+                  <User className="w-3 h-3 text-gray-400 shrink-0" />
+                  <span className="truncate text-left">{subject.teacher}</span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 ml-1">
+                   <span className="font-semibold bg-gray-100 px-1 rounded">
+                     {subject.room}
+                   </span>
+                </div>
+              </div>
+            </div>
+          </td>
+        );
+
+        i += duration;
+      }
+    }
+    return cells;
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-300 overflow-hidden text-gray-900 font-sans">
+      <div className="p-4 border-b border-gray-300 bg-gray-50 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Calendar className="w-5 h-5 text-indigo-600" />
+          <div>
+            <h2 className="font-bold text-lg text-gray-800">
+              {groupName || "ตารางเรียนรวม (Master Schedule)"}
+            </h2>
+            {advisor && (
+              <p className="text-sm text-gray-500 flex items-center gap-1 mt-0.5">
+                <User className="w-3 h-3" />
+                ครูที่ปรึกษา: {advisor}
+              </p>
+            )}
+          </div>
+        </div>
+        {schedule.length > 0 && (
+          <span className="text-xs font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-100">
+            {schedule.length} คาบเรียน
+          </span>
+        )}
+      </div>
+
+      {failedTasks && failedTasks.length > 0 && (
+        <div className="m-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-md flex flex-col gap-1">
+          <strong className="flex items-center gap-2">
+             ⚠️ พบปัญหาการจัดตาราง {failedTasks.length} รายการ
+          </strong>
+          <ul className="list-disc pl-8 mt-1 text-xs">
+            {failedTasks.map((fail, idx) => (
+              <li key={idx}>
+                <span className="font-semibold">{fail.subject_name}:</span> {fail.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="overflow-x-auto p-4 pt-0">
+        <table className="w-full min-w-[1000px] border-collapse border border-gray-300 mt-4 shadow-sm">
+          <thead>
+            <tr className="bg-gray-100 text-gray-600 text-xs uppercase tracking-wider">
+              <th className="p-3 w-24 border border-gray-300 sticky left-0 z-20 bg-gray-100 shadow-[1px_0_3px_rgba(0,0,0,0.05)]">
+                วัน / เวลา
+              </th>
+              {slots.map((slot) => (
+                <th
+                  key={slot.id}
+                  className="p-2 border border-gray-300 min-w-[100px] text-center h-16"
+                >
+                  <div className="font-bold text-gray-800">{slot.label}</div>
+                  <div className="text-[10px] text-gray-500 mt-1">
+                    {formatTime(slot.startTime)} - {formatTime(slot.endTime)}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {days.map((day) => (
+              <tr key={day}>
+                <td className="p-2 font-bold text-center border border-gray-300 bg-gray-50 text-gray-700 sticky left-0 z-10 shadow-[1px_0_3px_rgba(0,0,0,0.05)]">
+                  {day}
+                </td>
+                {renderRowCells(day)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
