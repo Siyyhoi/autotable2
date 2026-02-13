@@ -1,0 +1,3 @@
+DATABASE_URL="mongodb+srv://AutoTableDB:admin1234@cluster0.fgb0kjd.mongodb.net/AutoTableDB?retryWrites=true&w=majority"
+GEMINI_API_KEY="api gemini"
+GROQ_API_KEY="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"

@@ -9,21 +9,21 @@ export async function GET() {
     // 1. ดึง Config ของโรงเรียน
     const config = await db.collection("SchoolConfig").findOne({});
 
-    // 2. ดึง Timeslot แค่วันเดียว (เช่น วันจันทร์) มาทำหัวตาราง
-    // เรียงตาม slotNo จากน้อยไปมาก
+    // 2. ดึง Timeslot ทั้งหมดจาก Database
+    // โดยปกติ Timeslot จะเหมือนกันทุกวัน เราจึงดึงแค่ของวันจันทร์ (Mon) มาเป็นโครงสร้างหลัก
     const slots = await db.collection("Timeslot")
-      .find({ day: "Mon" }) 
-      .sort({ slotNo: 1 })
+      .find({ day: "Mon" })
+      .sort({ period: 1 }) // เรียงตาม period (คาบที่)
       .toArray();
 
-    return NextResponse.json({ 
-        schoolName: config?.schoolName || "My School",
-        slots: slots.map(s => ({
-            id: s.slotNo,
-            startTime: s.startTime,
-            endTime: s.endTime,
-            label: `${s.startTime} - ${s.endTime}`
-        }))
+    return NextResponse.json({
+      schoolName: config?.schoolName || "My School",
+      slots: slots.map(s => ({
+        id: s.period,        // ใช้ period เป็น id
+        startTime: s.start,
+        endTime: s.end,
+        label: `คาบที่ ${s.period}`
+      }))
     });
 
   } catch (error: any) {

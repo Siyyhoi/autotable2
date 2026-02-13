@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import ConfigSchool from "@/components/config/Configschool"; 
 import ConfigRoom from "@/components/config/ConfigRoom";
 import ConfigSubject from "@/components/config/ConfigSubject";
 import ConfigTeacher from "@/components/config/ConfigTeacher";
 import AIChatPanel from "@/components/aichatpanel";
 
-import { 
-  Calendar, User, MapPin, Settings, School, LayoutGrid, 
+import {
+  Calendar, User, MapPin, Settings, School, LayoutGrid,
   Users, BookOpen, MessageSquare
 } from "lucide-react";
 
@@ -28,8 +27,8 @@ export default function Home() {
       .then((res) => res.json())
       .then((data) => {
         if (data.slots) {
-            setSlots(data.slots);
-            setSchoolName(data.schoolName);
+          setSlots(data.slots);
+          setSchoolName(data.schoolName);
         }
       })
       .finally(() => setIsLoadingData(false));
@@ -44,7 +43,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-8 font-sans text-gray-800">
       <div className="max-w-[95%] mx-auto space-y-6">
-        
+
         {/* Header Section */}
         <div className="bg-gradient-to-r from-indigo-900 to-purple-900 text-white p-6 rounded-2xl shadow-2xl flex items-center justify-between">
           <div className="flex items-start gap-4">
@@ -82,7 +81,7 @@ export default function Home() {
               </span>
             )}
           </div>
-          
+
           <div className="overflow-x-auto pb-4">
             <table className="w-full min-w-[1000px] border-collapse">
               <thead>
@@ -90,7 +89,7 @@ export default function Home() {
                   <th className="p-4 w-24 text-center border-r border-gray-200 bg-gray-200/70 sticky left-0 z-10">Day</th>
                   {slots.map((slot) => (
                     <th key={slot.id} className="p-3 text-center border-r border-gray-200 last:border-0 min-w-[140px]">
-                      <div className="font-bold text-gray-800">คาบที่ {slot.id}</div>
+                      <div className="font-bold text-gray-800">{slot.label}</div>
                       <div className="text-[10px] text-gray-500 font-normal mt-0.5 bg-white/50 px-2 py-0.5 rounded-full inline-block">
                         {slot.startTime} - {slot.endTime}
                       </div>
@@ -108,7 +107,9 @@ export default function Home() {
                       {day}
                     </td>
                     {slots.map((slot) => {
-                      const subject = getClass(day, slot.id);
+                      // แก้ไขการดึงข้อมูลตารางเรียน ให้แมพกับคาบเรียน (period) หรือ เวลา
+                      // ในที่นี้เราใช้ slot.id ซึ่งคือ period
+                      const subject = schedule.find((s) => s.day === day && s.period === slot.id);
                       return (
                         <td key={slot.id} className="p-2 border-r border-gray-200 last:border-0 align-top h-32">
                           {subject ? (
@@ -149,53 +150,41 @@ export default function Home() {
 
         {/* Developer Zone */}
         <div className="mt-12 p-8 bg-gradient-to-br from-slate-100 to-gray-100 border-2 border-dashed border-slate-300 rounded-2xl shadow-inner">
-            <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
-                🛠️ ส่วนตั้งค่า (Developer Zone)
-            </h3>
-            <div className="flex flex-wrap gap-4">
-                <button 
-                    onClick={() => setActiveModal("school")}
-                    className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border-2 hover:border-indigo-500 hover:text-indigo-600 hover:shadow-lg transition-all"
-                >
-                    <Settings className="w-5 h-5" />
-                    <div className="text-left">
-                        <div className="font-semibold text-sm">ตั้งค่าโรงเรียน</div>
-                        <div className="text-xs text-gray-500">เวลาเรียน, คาบเรียน</div>
-                    </div>
-                </button>
+          <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
+            🛠️ ส่วนตั้งค่า (Developer Zone)
+          </h3>
+          <div className="flex flex-wrap gap-4">
+            <button
+              onClick={() => setActiveModal("room")}
+              className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border-2 hover:border-pink-500 hover:text-pink-600 hover:shadow-lg transition-all">
+              <LayoutGrid className="w-5 h-5" />
+              <div className="text-left">
+                <div className="font-semibold text-sm">จัดการห้องเรียน</div>
+                <div className="text-xs text-gray-500">เพิ่มห้อง, ความจุ</div>
+              </div>
+            </button>
 
-                <button 
-                    onClick={() => setActiveModal("room")} 
-                    className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border-2 hover:border-pink-500 hover:text-pink-600 hover:shadow-lg transition-all">
-                    <LayoutGrid className="w-5 h-5" />
-                    <div className="text-left">
-                        <div className="font-semibold text-sm">จัดการห้องเรียน</div>
-                        <div className="text-xs text-gray-500">เพิ่มห้อง, ความจุ</div>
-                    </div>
-                </button>
+            <button
+              onClick={() => setActiveModal("teacher")}
+              className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border-2 hover:border-emerald-500 hover:text-emerald-600 hover:shadow-lg transition-all">
+              <Users className="w-5 h-5" />
+              <div className="text-left">
+                <div className="font-semibold text-sm">จัดการครู</div>
+              </div>
+            </button>
 
-                <button 
-                    onClick={() => setActiveModal("teacher")} 
-                    className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border-2 hover:border-emerald-500 hover:text-emerald-600 hover:shadow-lg transition-all">
-                    <Users className="w-5 h-5" />
-                    <div className="text-left">
-                        <div className="font-semibold text-sm">จัดการครู</div>
-                    </div>
-                </button>
-
-                <button 
-                onClick={() => setActiveModal("subject")} 
-                className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border-2 hover:border-blue-500 hover:text-blue-600 hover:shadow-lg transition-all">
-                    <BookOpen className="w-5 h-5" />
-                    <div className="text-left">
-                        <div className="font-semibold text-sm">จัดการวิชา</div>
-                    </div>
-                </button>
-            </div>
+            <button
+              onClick={() => setActiveModal("subject")}
+              className="flex items-center gap-2 bg-white px-5 py-3 rounded-xl border-2 hover:border-blue-500 hover:text-blue-600 hover:shadow-lg transition-all">
+              <BookOpen className="w-5 h-5" />
+              <div className="text-left">
+                <div className="font-semibold text-sm">จัดการวิชา</div>
+              </div>
+            </button>
+          </div>
         </div>
 
         {/* Render Modals */}
-        {activeModal === "school" && <ConfigSchool onClose={() => setActiveModal(null)} />}
         {activeModal === "room" && <ConfigRoom onClose={() => setActiveModal(null)} />}
         {activeModal === "subject" && <ConfigSubject onClose={() => setActiveModal(null)} />}
         {activeModal === "teacher" && <ConfigTeacher onClose={() => setActiveModal(null)} />}

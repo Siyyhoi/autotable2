@@ -14,6 +14,7 @@ interface SchoolConfig {
 interface ScheduleTableProps {
   schedule: any[];        // ข้อมูลตารางเรียนจาก AI
   config: SchoolConfig | null; // รับ Config แทน Slots
+  slots?: any[];          // รับ Slots จาก Database (Optional เพราะอาจจะยังใช้ Config เดิมอยู่)
   loading: boolean;
 }
 
@@ -32,25 +33,28 @@ const minutesToTime = (totalMinutes: number) => {
     .padStart(2, "0")}`;
 };
 
-export default function ScheduleTable({ schedule, config, loading }: ScheduleTableProps) {
+export default function ScheduleTable({ schedule, config, slots = [], loading }: ScheduleTableProps) {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 
-  // 2. คำนวณ Slots อัตโนมัติตาม Config (ใช้ useMemo เพื่อไม่ให้คำนวณใหม่ทุกครั้งที่ render)
-  const generatedSlots = useMemo(() => {
+  // 2. คำนวณ Slots อัตโนมัติตาม Config (ถ้าไม่มี slots จาก DB)
+  const displaySlots = useMemo(() => {
+    // ถ้ามี slots จาก DB ให้ใช้เลย
+    if (slots && slots.length > 0) return slots;
+
+    // ถ้าไม่มีให้ Generate จาก Config
     if (!config) return [];
 
-    const slots = [];
+    const generated = [];
     let current = timeToMinutes(config.startTime);
     const end = timeToMinutes(config.endTime);
     let slotNo = 1;
 
-    // วนลูปสร้างคาบ จนกว่าจะเกินเวลาเลิกเรียน
     while (current + config.periodDuration <= end) {
       const startTime = minutesToTime(current);
       const endTime = minutesToTime(current + config.periodDuration);
 
-      slots.push({
-        id: slotNo,       // ใช้สำหรับ Map กับ slotNo ใน schedule
+      generated.push({
+        id: slotNo,
         slotNo: slotNo,
         startTime,
         endTime,
@@ -61,13 +65,16 @@ export default function ScheduleTable({ schedule, config, loading }: ScheduleTab
       slotNo++;
     }
 
-    return slots;
-  }, [config]); // คำนวณใหม่เมื่อ config เปลี่ยน
+    return generated;
+  }, [config, slots]);
 
   // ฟังก์ชันหาว่าคาบนี้เรียนวิชาอะไร
-  const getClass = (day: string, slotNo: number) => {
-    // เทียบ slotNo ที่เรา generate กับข้อมูลจาก AI
-    return schedule.find((s) => s.day === day && s.slotNo === slotNo);
+  const getClass = (day: string, slotId: number) => {
+    // เทียบ id context
+    // ถ้าเป็น DB slot -> id คือ period
+    // ถ้าเป็น Generated -> id คือ slotNo
+    // โครงสร้าง schedule ควรมี field ที่ตรงกัน
+    return schedule.find((s) => s.day === day && (s.period === slotId || s.slotNo === slotId));
   };
 
   return (
@@ -85,7 +92,7 @@ export default function ScheduleTable({ schedule, config, loading }: ScheduleTab
             </span>
           )}
         </div>
-        
+
         {loading && (
           <span className="text-xs text-gray-400 animate-pulse flex items-center gap-1">
             <Clock className="w-3 h-3" /> กำลังประมวลผล...
@@ -102,8 +109,8 @@ export default function ScheduleTable({ schedule, config, loading }: ScheduleTab
                 Day
               </th>
 
-              {/* Loop สร้างหัวตารางจาก generatedSlots */}
-              {generatedSlots.map((slot) => (
+              {/* Loop สร้างหัวตารางจาก displaySlots */}
+              {displaySlots.map((slot: any) => (
                 <th
                   key={slot.id}
                   className="p-3 text-center border-r border-gray-200 last:border-0 min-w-[140px]"
@@ -116,7 +123,7 @@ export default function ScheduleTable({ schedule, config, loading }: ScheduleTab
               ))}
 
               {/* กรณีไม่มี Config หรือ Generate ไม่ได้ */}
-              {generatedSlots.length === 0 && !loading && (
+              {displaySlots.length === 0 && !loading && (
                 <th className="p-4 text-center text-red-400 font-normal">
                   ไม่พบการตั้งค่าเวลาเรียน (School Config)
                 </th>
@@ -131,8 +138,8 @@ export default function ScheduleTable({ schedule, config, loading }: ScheduleTab
                 </td>
 
                 {/* Loop สร้างช่องตาราง */}
-                {generatedSlots.map((slot) => {
-                  const subject = getClass(day, slot.slotNo); // ใช้ slotNo หาข้อมูล
+                {displaySlots.map((slot: any) => {
+                  const subject = getClass(day, slot.id); // ใช้ id หาข้อมูล
                   return (
                     <td
                       key={`${day}-${slot.id}`}
