@@ -1,0 +1,96 @@
+const API_URL = "http://localhost:3000/api/generate";
+
+// Mock schedule data for testing (simplified)
+const mockSchedule = [
+  {
+    day: "Mon",
+    slotNo: 1,
+    subject: "S001",
+    subjectName: "Mathematics",
+    teacher: "T001",
+    room: "R001",
+  },
+  {
+    day: "Mon",
+    slotNo: 2,
+    subject: "S002",
+    subjectName: "Physics",
+    teacher: "T002",
+    room: "R002",
+  },
+  {
+    day: "Tue",
+    slotNo: 1,
+    subject: "S001",
+    subjectName: "Mathematics",
+    teacher: "T001",
+    room: "R001",
+  },
+  {
+    day: "Fri",
+    slotNo: 4,
+    subject: "S003",
+    subjectName: "Chemistry",
+    teacher: "T003",
+    room: "R003",
+  },
+];
+
+async function testCommand(command) {
+  console.log(`\n🧪 Testing command: "${command}"`);
+  try {
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: command,
+        currentSchedule: mockSchedule,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      console.log(`✅ Success: ${data.message || "No message"}`);
+      console.log(`   Action: ${data.action}`);
+      if (data.action === "DELETE_ALL") {
+        console.log(`   Result count: ${data.result.length}`);
+      } else if (data.action === "DELETE_SUBJECT") {
+        console.log(`   Deleted count: ${data.deletedCount}`);
+        console.log(`   Remaining: ${data.result.length}`);
+      } else if (data.action === "MOVE") {
+        console.log(`   Moved: ${JSON.stringify(data.moved)}`);
+      }
+    } else {
+      console.error(`❌ Failed: ${data.error}`);
+    }
+  } catch (error) {
+    console.error(`❌ Error: ${error.message}`);
+  }
+}
+
+async function main() {
+  // Test 1: Move
+  await testCommand("ย้ายคาบ 1 วันจันทร์ ไปวันพุธ คาบ 1");
+
+  // Test 2: Swap
+  await testCommand("สลับคาบ 1 วันจันทร์ กับ คาบ 2 วันจันทร์");
+
+  // Test 3: Delete Subject
+  await testCommand("ลบวิชา Mathematics ทั้งหมด");
+
+  // Test 4: Delete All
+  await testCommand("ลบคาบทั้งหมด");
+
+  // Test 5: Bug Reproduction
+  await testCommand("ลบคาบ 7 วันศุกร์");
+  await testCommand("วิเคราะห์ตารางเรียน");
+
+  // 🎯 Test Robust Regex Patterns (Day-First / No Spaces)
+  // Use Wed Slot 12 which was found to be empty in browser test
+  await testCommand("ย้ายคาบวันจันทร์คาบที่1ไปวันพุธคาบที่12");
+  await testCommand("ลบวันศุกร์คาบที่7"); // Day first
+  await testCommand("สลับวันจันทร์คาบ3กับวันจันทร์คาบ4"); // Swap Day first (Valid swap)
+}
+
+main();

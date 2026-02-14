@@ -1,36 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend - AutoTable2
 
-## Getting Started
+Frontend application สำหรับระบบสร้างตารางสอนอัตโนมัติ
 
-First, run the development server:
+## 🏗️ Structure
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+src/
+├── @types/           # TypeScript types
+├── app/              # Next.js App Router pages
+├── components/       # React components
+│   ├── config/      # Configuration UI
+│   ├── tables/      # Table display components
+│   └── ui/          # Reusable UI components
+├── hooks/           # Custom React hooks
+├── lib/             # Utilities
+├── styles/          # Global styles
+└── utils/           # Helper functions
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 🚀 Development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# Install dependencies
+npm install
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Run development server
+npm run dev
 
-## Learn More
+# Build for production
+npm run build
 
-To learn more about Next.js, take a look at the following resources:
+# Run production build
+npm start
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 📦 Components
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Config Components
 
-## Deploy on Vercel
+- `ConfigRoom.tsx` - Room management
+- `ConfigStudentGroup.tsx` - Student group management
+- `ConfigSubject.tsx` - Subject management
+- `ConfigTeacher.tsx` - Teacher management
+- `ConfigTeach.tsx` - Teaching assignment
+- `ConfigStudentRes.tsx` - Student registration
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Table Components
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `DataPreview.tsx` - Preview imported data
+- `MasterScheduleTable.tsx` - Master schedule view
+- `ScheduleTable.tsx` - Individual schedule view
+- `TimetableClassic.tsx` - Classic timetable format
+
+### UI Components
+
+- `AIChatPanel.tsx` - AI chat interface
+
+## 🎨 Styling
+
+ใช้ **TailwindCSS 4** สำหรับ styling:
+
+- Utility-first CSS
+- Custom theme configuration
+- Responsive design
+- Dark mode support (future)
+
+## 🔗 API Integration
+
+Frontend เชื่อมต่อกับ Backend API ผ่าน:
+
+- `/api/generate` - Schedule generation
+- `/api/export-schedule` - Export to PDF/Excel
+- `/api/import-schedule` - Import from CSV
+- `/api/master-data` - CRUD operations
+
+## 📝 Notes
+
+- ใช้ Next.js App Router (ไม่ใช่ Pages Router)
+- Component ทั้งหมดเป็น TypeScript
+- ใช้ `@/` path alias สำหรับ imports
